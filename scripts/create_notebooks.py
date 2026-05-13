@@ -270,7 +270,7 @@ def segmentation_nb():
         md("""
 # 03. Segmentation & Labeling
 
-목표는 검은 선으로 둘러싸인 흰 영역을 색칠 가능한 영역으로 분리하고, 각 영역 중심에 번호를 삽입하는 것입니다.
+목표는 검은 선으로 둘러싸인 흰 영역을 색칠 가능한 영역으로 분리하고, 각 영역 중심에 색상 번호를 삽입하는 것입니다.
 
 비교 알고리즘:
 
@@ -296,8 +296,12 @@ quantized, palette, label_map = kmeans_quantization_with_labels(image, K)
 edges = clean_edges(hybrid_canny_color_edges(quantized, 60, 150, label_map), close_iter=1, thickness=2)
 line_image = coloring_line_image(edges)
 
-# Connected Components는 검은 선으로 분리된 흰 영역을 라벨 번호로 구분합니다.
+# Connected Components는 검은 선으로 분리된 흰 영역을 고유 영역 ID로 구분합니다.
 (region_map, regions), cc_time = timed_call(segment_connected_components, line_image, MIN_AREA)
+
+# 컬러링북에 들어가는 숫자는 영역 ID가 아니라 K-Means 팔레트 색상 번호입니다.
+# 따라서 같은 색이 떨어진 여러 영역에 있어도 같은 숫자가 표시됩니다.
+regions = assign_region_color_numbers(regions, region_map, label_map, palette)
 region_preview = color_region_preview(region_map)
 
 # 각 영역 중심 근처에 번호를 넣고, 기존 번호와 겹치면 주변 후보 위치로 이동합니다.
@@ -322,9 +326,9 @@ show_images([
 ], cols=2, figsize=(12, 11), cmap="gray", save_path="outputs/03_segmentation_compare.png")
 """),
         md("""
-## 영역 중심 좌표와 번호 정보
+## 영역 중심 좌표와 색상 번호 정보
 
-아래 표는 각 영역의 번호, 넓이, 중심 좌표, 바운딩 박스를 보여줍니다.
+아래 표에서 `region_id`는 분리된 영역의 고유 번호이고, `color_id`는 실제 컬러링북에 표시되는 팔레트 번호입니다. 같은 색상은 같은 `color_id`를 가집니다.
 """),
         code(r"""
 region_rows = []
@@ -332,7 +336,9 @@ for region in regions[:30]:
     # 발표 표가 너무 길어지지 않도록 앞 30개 영역만 출력합니다.
     cx, cy = region["centroid"]
     region_rows.append({
-        "id": region["id"],
+        "region_id": region["id"],
+        "color_id": region["color_id"],
+        "color_rgb": region["color_rgb"],
         "area": region["area"],
         "center_x": round(cx, 1),
         "center_y": round(cy, 1),
@@ -360,9 +366,10 @@ print_table(summary_rows)
         md("""
 ## 비교 분석
 
-- Connected Components: 닫힌 흰 영역을 직접 분리하므로 번호 삽입 기준으로 가장 명확합니다.
+- Connected Components: 닫힌 흰 영역을 직접 분리하므로 색상 번호 삽입 위치를 계산하기 좋습니다.
 - Contour Detection: 외곽선 확인과 시각화에 좋지만 내부 구멍, 계층 구조 처리가 추가로 필요할 수 있습니다.
 - Watershed: 복잡한 객체 분리에 유용하지만 컬러링북에서는 과분할이 발생하기 쉽습니다.
+- 색상 번호화: 영역마다 고유 번호를 붙이는 것이 아니라, 각 영역의 dominant K-Means 색상 번호를 표시합니다.
 - 번호 겹침 최소화: 큰 영역부터 번호를 배치하고, 중심 주변 후보 위치를 검사해 기존 번호 박스와 겹치지 않는 위치를 선택합니다.
 """),
     ]
@@ -393,7 +400,7 @@ def final_pipeline_nb():
 5. Laplacian 결과
 6. Canny 결과
 7. 영역 분리 결과
-8. 번호가 들어간 최종 컬러링북 이미지
+8. 색상 번호가 들어간 최종 컬러링북 이미지
 9. RGB 색상표
 10. 성능 비교 표
 """),
@@ -441,6 +448,7 @@ canny_line = coloring_line_image(canny_edges_clean)
 
 # 3. 영역 분리 및 번호화: Connected Components로 흰 영역을 분리합니다.
 (region_map, regions), seg_time = timed_call(segment_connected_components, canny_line, MIN_REGION_AREA)
+regions = assign_region_color_numbers(regions, region_map, kmeans_labels, kmeans_palette)
 region_preview = color_region_preview(region_map)
 numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.45)
 
@@ -538,7 +546,7 @@ plt.show()
 
 ### 영역 분리
 
-- Connected Components 장점: 닫힌 흰 영역을 직접 번호화하기 쉬워 최종 산출물에 적합합니다.
+- Connected Components 장점: 닫힌 흰 영역을 직접 분리하고, 각 영역에 dominant 색상 번호를 넣기 쉬워 최종 산출물에 적합합니다.
 - Connected Components 단점: 선이 끊기면 영역이 합쳐질 수 있어 Morphology 보정이 중요합니다.
 - Contour Detection 장점: 외곽선 시각화와 영역 형태 확인이 쉽습니다.
 - Contour Detection 단점: 내부 계층 구조 처리가 필요할 수 있습니다.
@@ -547,7 +555,7 @@ plt.show()
 
 ## 최종 알고리즘 선택 이유
 
-최종 조합은 `K-Means + Hybrid Canny/Color Boundary + Connected Components/Contour Detection`입니다. K-Means는 원본 색상 보존과 색상 수 제어의 균형이 좋고, Hybrid 경계선은 밝기가 비슷한 색상 사이의 경계까지 보완하며, Connected Components는 번호를 넣을 색칠 영역을 직접 계산하기 좋습니다.
+최종 조합은 `K-Means + Hybrid Canny/Color Boundary + Connected Components/Contour Detection`입니다. K-Means는 원본 색상 보존과 색상 수 제어의 균형이 좋고, Hybrid 경계선은 밝기가 비슷한 색상 사이의 경계까지 보완하며, Connected Components는 색상 번호를 넣을 색칠 영역을 직접 계산하기 좋습니다.
 
 ## Trade-off 분석
 
@@ -561,7 +569,7 @@ plt.show()
 - 같은 이미지에서 K=5, 10, 20 결과를 나란히 보여주며 복잡도 변화를 설명합니다.
 - Sobel, Laplacian, Canny의 Edge Density와 시각적 노이즈를 비교합니다.
 - 영역 개수, 평균 영역 크기, 작은 영역 개수를 HCI 지표로 연결합니다.
-- 최종 결과는 색상표와 번호가 연결되므로 사용자가 어떤 색으로 칠할지 쉽게 알 수 있습니다.
+- 최종 결과는 K-Means 색상표 번호와 영역 번호가 연결되므로, 같은 색상 영역은 같은 숫자로 칠할 수 있습니다.
 
 ## HCI 관점 개선점
 

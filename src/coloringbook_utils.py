@@ -290,6 +290,34 @@ def segment_connected_components(line_image, min_area=120):
     return region_map, regions
 
 
+def assign_region_color_numbers(regions, region_map, label_map, palette=None):
+    """Assign each segmented region the dominant K-Means color number.
+
+    Region ids are unique shape ids, but coloring-book numbers should represent
+    palette colors. This function adds color_label, color_id, and color_rgb to
+    each region so separated areas with the same dominant color get the same
+    printed number.
+    """
+    updated = []
+    for region in regions:
+        mask = region_map == region["id"]
+        labels = label_map[mask]
+        if labels.size == 0:
+            color_label = -1
+        else:
+            color_label = int(np.bincount(labels.astype(np.int32)).argmax())
+
+        enriched = dict(region)
+        enriched["color_label"] = color_label
+        enriched["color_id"] = color_label + 1 if color_label >= 0 else region["id"]
+        if palette is not None and 0 <= color_label < len(palette):
+            enriched["color_rgb"] = tuple(int(v) for v in palette[color_label])
+        else:
+            enriched["color_rgb"] = None
+        updated.append(enriched)
+    return updated
+
+
 def contour_regions(line_image, min_area=120):
     """Find external contours as an alternative region proposal method."""
     if line_image.ndim == 3:
@@ -343,7 +371,7 @@ def label_regions(line_image, regions, font_scale=0.45):
     offsets = [(0, 0), (-12, 0), (12, 0), (0, -12), (0, 12), (-18, -10), (18, 10)]
 
     for region in sorted_regions:
-        text = str(region["id"])
+        text = str(region.get("color_id", region["id"]))
         (tw, th), base = cv2.getTextSize(text, font, font_scale, 1)
         cx, cy = region["centroid"]
         x0, y0, w, h = region["bbox"]
