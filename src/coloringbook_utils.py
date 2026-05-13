@@ -444,8 +444,20 @@ def watershed_segmentation(image):
     return result, markers
 
 
-def label_regions(line_image, regions, font_scale=0.45, skip_background=False):
-    """Insert numbers near region centers while reducing label overlaps."""
+def label_regions(
+    line_image,
+    regions,
+    font_scale=0.45,
+    skip_background=False,
+    region_map=None,
+    avoid_overlap=False,
+):
+    """Insert color numbers inside each segmented region.
+
+    If region_map is supplied, the label is placed near the largest empty point
+    inside that exact connected component. This is closer to paint-by-number
+    sheets than using only the geometric centroid.
+    """
     if line_image.ndim == 2:
         canvas = cv2.cvtColor(line_image, cv2.COLOR_GRAY2RGB)
     else:
@@ -454,31 +466,57 @@ def label_regions(line_image, regions, font_scale=0.45, skip_background=False):
     occupied = []
     font = cv2.FONT_HERSHEY_SIMPLEX
     sorted_regions = sorted(regions, key=lambda r: r["area"], reverse=True)
-    offsets = [(0, 0), (-12, 0), (12, 0), (0, -12), (0, 12), (-18, -10), (18, 10)]
 
     for region in sorted_regions:
         if skip_background and region.get("is_background", False):
             continue
         text = str(region.get("color_id", region["id"]))
-        (tw, th), base = cv2.getTextSize(text, font, font_scale, 1)
-        cx, cy = region["centroid"]
         x0, y0, w, h = region["bbox"]
-        chosen = None
-        for ox, oy in offsets:
-            x = int(np.clip(cx + ox - tw / 2, x0 + 2, x0 + w - tw - 2))
-            y = int(np.clip(cy + oy + th / 2, y0 + th + 2, y0 + h - 2))
-            box = (x - 2, y - th - 2, x + tw + 2, y + base + 2)
-            overlaps = any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3])
-                           for b in occupied)
-            if not overlaps:
-                chosen = (x, y, box)
-                break
+
+        if region_map is not None:
+            cx, cy = _best_label_point(region_map, region["id"], region["bbox"])
+        else:
+            cx, cy = region["centroid"]
+
+        scale = min(font_scale, max(0.24, min(w, h) / 42.0))
+        thickness = 1
+        (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
+        if tw + 4 > w and tw > 0:
+            scale *= max(0.22, (w - 4) / tw)
+            (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
+
+        x = int(np.clip(cx - tw / 2, x0 + 1, max(x0 + 1, x0 + w - tw - 1)))
+        y = int(np.clip(cy + th / 2, y0 + th + 1, max(y0 + th + 1, y0 + h - 1)))
+        box = (x - 2, y - th - 2, x + tw + 2, y + base + 2)
+
+        chosen = (x, y, box)
+        if avoid_overlap:
+            overlaps = any(
+                not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3])
+                for b in occupied
+            )
+            if overlaps:
+                chosen = None
         if chosen is None:
             continue
         x, y, box = chosen
         occupied.append(box)
-        cv2.putText(canvas, text, (x, y), font, font_scale, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(canvas, text, (x, y), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
     return canvas
+
+
+def _best_label_point(region_map, region_id, bbox):
+    """Find an interior point that is far from the component boundary."""
+    x, y, w, h = bbox
+    component = (region_map[y:y + h, x:x + w] == region_id).astype(np.uint8)
+    if component.size == 0 or np.count_nonzero(component) == 0:
+        return (x + w / 2, y + h / 2)
+
+    padded = cv2.copyMakeBorder(component, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    dist = cv2.distanceTransform(padded, cv2.DIST_L2, 5)[1:-1, 1:-1]
+    _, _, _, max_loc = cv2.minMaxLoc(dist)
+    px, py = max_loc
+    return float(x + px), float(y + py)
 
 
 def color_region_preview(region_map):

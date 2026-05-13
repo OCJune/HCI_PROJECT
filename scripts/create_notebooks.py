@@ -301,8 +301,7 @@ line_image = coloring_line_image(edges)
 
 # 컬러링북에 들어가는 숫자는 영역 ID가 아니라 K-Means 팔레트 색상 번호입니다.
 # 따라서 같은 색이 떨어진 여러 영역에 있어도 같은 숫자가 표시됩니다.
-# 테두리에서 배경 RGB 색을 추정하고, Lab 색상 거리가 가까운 영역은 배경으로 봅니다.
-# 그래서 K-Means 라벨이 달라도 배경과 비슷한 색이면 번호를 생략합니다.
+# 테두리에서 배경 RGB 색을 추정하고, Lab 색상 거리가 가까운 영역은 배경 번호로 병합합니다.
 background_color = estimate_background_color(quantized)
 regions = assign_region_color_numbers(
     regions,
@@ -311,12 +310,14 @@ regions = assign_region_color_numbers(
     palette,
     background_color=background_color,
     background_color_threshold=16,
+    merge_background_similar=True,
 )
 numbered_regions = colorable_regions(regions)
 region_preview = color_region_preview(region_map)
 
-# 각 영역 중심 근처에 번호를 넣고, 기존 번호와 겹치면 주변 후보 위치로 이동합니다.
-numbered = label_regions(line_image, regions, font_scale=0.45)
+# 각 닫힌 영역 내부에서 가장 넓은 지점에 색상 번호를 넣습니다.
+# 예시 이미지처럼 같은 색상 번호가 여러 영역에 반복해서 표시됩니다.
+numbered = label_regions(line_image, regions, font_scale=0.45, region_map=region_map)
 
 # Contour와 Watershed는 비교용 결과로 함께 확인합니다.
 contour_preview, contours = contour_regions(line_image, MIN_AREA)
@@ -339,7 +340,7 @@ show_images([
         md("""
 ## 영역 중심 좌표와 색상 번호 정보
 
-아래 표에서 `region_id`는 분리된 영역의 고유 번호이고, `color_id`는 실제 컬러링북에 표시되는 팔레트 번호입니다. `background_distance`가 작아 `is_background=True`인 영역은 배경색과 비슷하다고 판단되어 번호를 찍지 않습니다.
+아래 표에서 `region_id`는 분리된 영역의 고유 번호이고, `color_id`는 실제 컬러링북에 표시되는 팔레트 번호입니다. `background_distance`가 작아 `is_background=True`인 영역은 배경색과 비슷하다고 판단되어 배경 번호로 병합됩니다.
 """),
         code(r"""
 print(f"Estimated background RGB: {tuple(int(v) for v in background_color)}")
@@ -361,7 +362,7 @@ for region in regions[:30]:
     })
 print_table(region_rows)
 print(f"Total segmented regions: {len(regions)}")
-print(f"Numbered colorable regions: {len(numbered_regions)}")
+print(f"Numbered regions: {len(numbered_regions)}")
 """),
         md("""
 ## 영역 지표 및 HCI 가독성
@@ -371,8 +372,8 @@ print(f"Numbered colorable regions: {len(numbered_regions)}")
         code(r"""
 metrics = region_metrics(numbered_regions, image.shape, small_area=300)
 summary_rows = [
-    {"metric": "Numbered Colorable Regions", "value": metrics["regions"]},
-    {"metric": "Skipped Background Regions", "value": len(regions) - len(numbered_regions)},
+    {"metric": "Numbered Regions", "value": metrics["regions"]},
+    {"metric": "Background-like Regions", "value": sum(1 for region in regions if region.get("is_background"))},
     {"metric": "Average Region Area", "value": metrics["average_area"]},
     {"metric": "Small Regions (<300 px)", "value": metrics["small_regions"]},
     {"metric": "Region Coverage", "value": metrics["region_coverage"]},
@@ -387,8 +388,8 @@ print_table(summary_rows)
 - Contour Detection: 외곽선 확인과 시각화에 좋지만 내부 구멍, 계층 구조 처리가 추가로 필요할 수 있습니다.
 - Watershed: 복잡한 객체 분리에 유용하지만 컬러링북에서는 과분할이 발생하기 쉽습니다.
 - 색상 번호화: 영역마다 고유 번호를 붙이는 것이 아니라, 각 영역의 dominant K-Means 색상 번호를 표시합니다.
-- 배경 제거: 테두리에서 추정한 배경 RGB와 Lab 색상 거리가 가까운 영역은 가운데에 끼어 있어도 번호를 생략합니다.
-- 번호 겹침 최소화: 큰 영역부터 번호를 배치하고, 중심 주변 후보 위치를 검사해 기존 번호 박스와 겹치지 않는 위치를 선택합니다.
+- 배경 번호 병합: 테두리에서 추정한 배경 RGB와 Lab 색상 거리가 가까운 영역은 가운데에 끼어 있어도 배경 번호로 표시합니다.
+- 번호 배치: 각 닫힌 영역 내부에서 가장 넓은 지점을 찾아 색상 번호를 넣습니다.
 """),
     ]
     write_notebook("03_segmentation.ipynb", cells)
@@ -474,10 +475,11 @@ regions = assign_region_color_numbers(
     kmeans_palette,
     background_color=background_color,
     background_color_threshold=16,
+    merge_background_similar=True,
 )
 numbered_regions = colorable_regions(regions)
 region_preview = color_region_preview(region_map)
-numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.45)
+numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.45, region_map=region_map)
 
 # 4. 저장: 단계별 결과를 outputs 폴더에 저장합니다.
 save_image_rgb("outputs/04_original.png", image)
@@ -519,7 +521,7 @@ performance_rows = [
     {"stage": "Canny", "runtime_sec": canny_time, "edge_density": edge_density(canny_raw), "regions": "", "average_area": "", "small_regions": ""},
     {"stage": "Hybrid Canny + Color Boundary", "runtime_sec": hybrid_time, "edge_density": edge_density(canny_edges_clean), "regions": "", "average_area": "", "small_regions": ""},
     {"stage": "Segmentation", "runtime_sec": seg_time, "edge_density": "", "regions": metrics["regions"], "average_area": metrics["average_area"], "small_regions": metrics["small_regions"]},
-    {"stage": "Skipped Background", "runtime_sec": "", "edge_density": "", "regions": len(regions) - len(numbered_regions), "average_area": "", "small_regions": ""},
+    {"stage": "Background-like Regions", "runtime_sec": "", "edge_density": "", "regions": sum(1 for region in regions if region.get("is_background")), "average_area": "", "small_regions": ""},
     {"stage": "Total Final", "runtime_sec": kmeans_time + canny_time + seg_time, "edge_density": edge_density(canny_edges_clean), "regions": metrics["regions"], "average_area": metrics["average_area"], "small_regions": metrics["small_regions"]},
 ]
 print_table(performance_rows)
@@ -576,7 +578,7 @@ plt.show()
 
 - Connected Components 장점: 닫힌 흰 영역을 직접 분리하고, 각 영역에 dominant 색상 번호를 넣기 쉬워 최종 산출물에 적합합니다.
 - Connected Components 단점: 선이 끊기면 영역이 합쳐질 수 있어 Morphology 보정이 중요합니다.
-- 배경색 생략 장점: 외곽에서 추정한 배경색과 비슷한 내부 빈 공간도 번호를 찍지 않아 색칠 대상이 더 명확해집니다.
+- 배경 번호 병합 장점: 외곽에서 추정한 배경색과 비슷한 내부 빈 공간도 같은 배경 번호로 표시되어 색상표와 일관됩니다.
 - Contour Detection 장점: 외곽선 시각화와 영역 형태 확인이 쉽습니다.
 - Contour Detection 단점: 내부 계층 구조 처리가 필요할 수 있습니다.
 - Watershed 장점: 겹친 객체 분리에 강합니다.
