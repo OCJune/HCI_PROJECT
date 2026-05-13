@@ -67,7 +67,7 @@ plt.rcParams["figure.dpi"] = 120
 
 # 직접 사용할 이미지가 있으면 여기에 경로를 넣으세요.
 # 예: IMAGE_PATH = "data/my_image.jpg"
-IMAGE_PATH = None
+IMAGE_PATH = "data/sample_input.png"
 
 # IMAGE_PATH가 None이면 발표/실험용 샘플 이미지가 자동 생성됩니다.
 image = load_image(IMAGE_PATH)
