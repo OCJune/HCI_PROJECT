@@ -81,10 +81,10 @@ FINAL_IMPORTS = COMMON_IMPORTS.replace(
     'IMAGE_PATH = "data/sample_input.png"\n'
     '\n'
     '# IMAGE_PATH가 None이면 발표/실험용 샘플 이미지가 자동 생성됩니다.',
-    '# 04_final_pipeline은 data/image.png만 입력 이미지로 사용합니다.\n'
-    'IMAGE_PATH = "data/image.png"\n'
+    '# 04_final_pipeline은 data/doraemong.jpeg만 입력 이미지로 사용합니다.\n'
+    'IMAGE_PATH = "data/doraemong.jpeg"\n'
     '\n'
-    '# data/image.png를 기준으로 전체 파이프라인을 실행합니다.',
+    '# data/doraemong.jpeg를 기준으로 전체 파이프라인을 실행합니다.',
 )
 
 
@@ -429,7 +429,7 @@ def final_pipeline_nb():
 
 입력:
 
-- `data/image.png` 입력 이미지
+- `data/doraemong.jpeg` 입력 이미지
 - 원하는 색상 개수 K
 - 경계선 Canny 임계값
 - 선 두께
