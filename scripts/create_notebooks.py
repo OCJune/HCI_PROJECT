@@ -317,7 +317,7 @@ region_preview = color_region_preview(region_map)
 
 # 각 닫힌 영역 내부에서 가장 넓은 지점에 색상 번호를 넣습니다.
 # 예시 이미지처럼 같은 색상 번호가 여러 영역에 반복해서 표시됩니다.
-numbered = label_regions(line_image, regions, font_scale=0.45, region_map=region_map)
+numbered = label_regions(line_image, regions, font_scale=0.9, region_map=region_map)
 
 # Contour와 Watershed는 비교용 결과로 함께 확인합니다.
 contour_preview, contours = contour_regions(line_image, MIN_AREA)
@@ -479,7 +479,7 @@ regions = assign_region_color_numbers(
 )
 numbered_regions = colorable_regions(regions)
 region_preview = color_region_preview(region_map)
-numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.45, region_map=region_map)
+numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.9, region_map=region_map)
 
 # 4. 저장: 단계별 결과를 outputs 폴더에 저장합니다.
 save_image_rgb("outputs/04_original.png", image)

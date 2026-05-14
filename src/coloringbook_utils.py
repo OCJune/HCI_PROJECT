@@ -447,7 +447,8 @@ def watershed_segmentation(image):
 def label_regions(
     line_image,
     regions,
-    font_scale=0.45,
+    font_scale=0.9,
+    min_font_scale=0.25,
     skip_background=False,
     region_map=None,
     avoid_overlap=False,
@@ -478,8 +479,14 @@ def label_regions(
         else:
             cx, cy = region["centroid"]
 
-        scale = font_scale
-        thickness = 1
+        scale = _fit_label_font_scale(
+            text,
+            font,
+            region["bbox"],
+            max_scale=font_scale,
+            min_scale=min_font_scale,
+        )
+        thickness = max(1, int(round(scale * 2)))
         (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
 
         x = int(np.clip(cx - tw / 2, x0 + 1, max(x0 + 1, x0 + w - tw - 1)))
@@ -500,6 +507,29 @@ def label_regions(
         occupied.append(box)
         cv2.putText(canvas, text, (x, y), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
     return canvas
+
+
+def _fit_label_font_scale(text, font, bbox, max_scale=0.9, min_scale=0.25, padding=4):
+    """Choose a text scale that fits inside the region bounding box."""
+    _, _, w, h = bbox
+    available_w = max(1, w - padding * 2)
+    available_h = max(1, h - padding * 2)
+    scale = max_scale
+
+    for _ in range(12):
+        thickness = max(1, int(round(scale * 2)))
+        (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
+        text_h = th + base
+        if tw <= available_w and text_h <= available_h:
+            return max(min_scale, scale)
+
+        width_ratio = available_w / max(1, tw)
+        height_ratio = available_h / max(1, text_h)
+        scale *= min(width_ratio, height_ratio) * 0.95
+        if scale <= min_scale:
+            return min_scale
+
+    return max(min_scale, min(scale, max_scale))
 
 
 def _best_label_point(region_map, region_id, bbox):
