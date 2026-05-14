@@ -75,6 +75,19 @@ show_images([("Original Image", image)], cols=1, figsize=(5, 5))
 """
 
 
+FINAL_IMPORTS = COMMON_IMPORTS.replace(
+    '# 직접 사용할 이미지가 있으면 여기에 경로를 넣으세요.\n'
+    '# 예: IMAGE_PATH = "data/my_image.jpg"\n'
+    'IMAGE_PATH = "data/sample_input.png"\n'
+    '\n'
+    '# IMAGE_PATH가 None이면 발표/실험용 샘플 이미지가 자동 생성됩니다.',
+    '# 04_final_pipeline은 data/image.png만 입력 이미지로 사용합니다.\n'
+    'IMAGE_PATH = "data/image.png"\n'
+    '\n'
+    '# data/image.png를 기준으로 전체 파이프라인을 실행합니다.',
+)
+
+
 def color_quantization_nb():
     cells = [
         md("""
@@ -416,7 +429,7 @@ def final_pipeline_nb():
 
 입력:
 
-- 사용자 이미지 경로
+- `data/image.png` 입력 이미지
 - 원하는 색상 개수 K
 - 경계선 Canny 임계값
 - 선 두께
@@ -435,7 +448,7 @@ def final_pipeline_nb():
 9. RGB 색상표
 10. 성능 비교 표
 """),
-        code(COMMON_IMPORTS),
+        code(FINAL_IMPORTS),
         md("""
 ## 전체 파라미터
 
