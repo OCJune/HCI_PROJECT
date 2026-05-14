@@ -103,6 +103,75 @@ def plot_palette(palette, title="RGB Palette", save_path=None):
     plt.show()
 
 
+def color_index_table_image(palette, regions=None, title="Color Index"):
+    """Create a legend image mapping printed numbers to palette colors."""
+    palette = np.asarray(palette, dtype=np.uint8)
+    counts = {}
+    if regions is not None:
+        for region in regions:
+            color_id = int(region.get("color_id", 0))
+            if color_id > 0:
+                counts[color_id] = counts.get(color_id, 0) + 1
+
+    row_h = 42
+    header_h = 82
+    margin = 18
+    width = 470
+    height = header_h + row_h * len(palette) + margin
+    table = np.full((height, width, 3), 255, dtype=np.uint8)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(table, title, (18, 32), font, 0.75, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(table, "No", (18, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "Color", (72, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "RGB", (146, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "HEX", (302, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "Regions", (382, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.line(table, (18, 74), (width - 18, 74), (190, 190, 190), 1)
+
+    for i, color in enumerate(palette):
+        color_id = i + 1
+        y0 = header_h + i * row_h
+        y_mid = y0 + 27
+        if i % 2 == 0:
+            table[y0:y0 + row_h, 10:width - 10] = (248, 248, 248)
+
+        rgb = tuple(int(v) for v in color)
+        hex_value = "#{:02X}{:02X}{:02X}".format(*rgb)
+        cv2.putText(table, str(color_id), (20, y_mid), font, 0.58, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.rectangle(table, (76, y0 + 8), (118, y0 + 32), rgb, -1)
+        cv2.rectangle(table, (76, y0 + 8), (118, y0 + 32), (80, 80, 80), 1)
+        cv2.putText(table, str(rgb), (146, y_mid), font, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(table, hex_value, (302, y_mid), font, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(table, str(counts.get(color_id, 0)), (405, y_mid), font, 0.48, (0, 0, 0), 1, cv2.LINE_AA)
+
+    return table
+
+
+def save_color_index_table(palette, save_path, regions=None, title="Color Index"):
+    """Save a legend image mapping printed numbers to palette colors."""
+    table = color_index_table_image(palette, regions=regions, title=title)
+    save_image_rgb(save_path, table)
+    return table
+
+
+def combine_with_color_index(image, palette, regions=None, save_path=None, title="Color Index"):
+    """Place a color-index table to the right of a result image."""
+    table = color_index_table_image(palette, regions=regions, title=title)
+    target_h = image.shape[0]
+    scale = target_h / table.shape[0]
+    table_w = max(1, int(table.shape[1] * scale))
+    table = cv2.resize(table, (table_w, target_h), interpolation=cv2.INTER_AREA)
+
+    gutter = 18
+    combined = np.full((target_h, image.shape[1] + gutter + table_w, 3), 255, dtype=np.uint8)
+    combined[:, :image.shape[1]] = image
+    combined[:, image.shape[1] + gutter:] = table
+    if save_path:
+        save_image_rgb(save_path, combined)
+    return combined
+
+
 def kmeans_quantization(image, k=10, attempts=3):
     """Color quantization using OpenCV K-Means clustering."""
     pixels = image.reshape((-1, 3)).astype(np.float32)
