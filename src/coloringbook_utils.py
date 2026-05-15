@@ -87,15 +87,28 @@ def show_images(items, cols=3, figsize=(14, 8), cmap=None, save_path=None):
 
 
 def plot_palette(palette, title="RGB Palette", save_path=None):
-    """Visualize RGB palette values as color swatches."""
+    """Visualize RGB palette values as color swatches.
+
+    Figure width scales with the palette size so the index and RGB labels
+    under each swatch never overlap, even for large K. The swatches are
+    stretched to fill the width (aspect="auto") and the index number and RGB
+    value are placed on separate lines for readability.
+    """
     palette = np.asarray(palette, dtype=np.uint8)
-    fig, ax = plt.subplots(figsize=(max(8, len(palette) * 0.8), 1.8))
-    swatches = np.zeros((60, len(palette) * 60, 3), dtype=np.uint8)
+    n = len(palette)
+    cell_w = 100
+    fig, ax = plt.subplots(figsize=(max(12, n * 1.4), 2.4))
+    swatches = np.zeros((60, n * cell_w, 3), dtype=np.uint8)
     for i, color in enumerate(palette):
-        swatches[:, i * 60:(i + 1) * 60] = color
-        ax.text(i * 60 + 30, 78, f"{i + 1}\n{tuple(int(v) for v in color)}",
+        swatches[:, i * cell_w:(i + 1) * cell_w] = color
+        cx = i * cell_w + cell_w / 2
+        ax.text(cx, 70, str(i + 1), ha="center", va="top",
+                fontsize=10, fontweight="bold")
+        ax.text(cx, 92, str(tuple(int(v) for v in color)),
                 ha="center", va="top", fontsize=8)
-    ax.imshow(swatches)
+    ax.imshow(swatches, aspect="auto")
+    ax.set_xlim(0, n * cell_w)
+    ax.set_ylim(120, 0)
     ax.set_title(title)
     ax.axis("off")
     if save_path:
@@ -174,6 +187,29 @@ def median_cut_quantization(image, k=10, sample_size=60000):
     labels = np.argmin(distances, axis=1)
     result = palette[labels].reshape(image.shape)
     return result, palette
+
+
+def quantization_error(original, quantized):
+    """Measure how well a quantized image preserves the original colors.
+
+    Both images are converted to the Lab color space, which is closer to human
+    color perception than RGB. The score is the mean per-pixel Lab distance, so
+    a lower value means the simplified image keeps the original colors better.
+    Useful for comparing K-Means, Posterization, and Median Cut quantitatively.
+    """
+    lab_original = cv2.cvtColor(original, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab_quantized = cv2.cvtColor(quantized, cv2.COLOR_RGB2LAB).astype(np.float32)
+    return float(np.mean(np.linalg.norm(lab_original - lab_quantized, axis=2)))
+
+
+def count_unique_colors(image):
+    """Count how many distinct RGB colors actually remain in an image.
+
+    The requested K is only an upper bound. Posterization in particular can
+    return fewer colors than asked, so reporting the real count makes the
+    algorithm comparison table more honest.
+    """
+    return int(len(np.unique(image.reshape(-1, image.shape[-1]), axis=0)))
 
 
 def sobel_edges(image, threshold=70):
