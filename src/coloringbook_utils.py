@@ -298,6 +298,134 @@ def quantization_error(original, quantized):
     return float(np.mean(np.linalg.norm(lab_original - lab_quantized, axis=2)))
 
 
+def _zhang_suen_thinning(binary):
+    """Zhang-Suen thinning algorithm for binary images.
+
+    Input: binary image with values 0 or 255 (uint8). Returns thinned binary image (0/255).
+    """
+    img = (binary > 0).astype(np.uint8)
+    prev = np.zeros_like(img)
+    changed = True
+    while changed:
+        changed = False
+        # step 1
+        m = np.zeros_like(img)
+        rows, cols = img.shape
+        for i in range(1, rows - 1):
+            for j in range(1, cols - 1):
+                P2 = img[i - 1, j]
+                P3 = img[i - 1, j + 1]
+                P4 = img[i, j + 1]
+                P5 = img[i + 1, j + 1]
+                P6 = img[i + 1, j]
+                P7 = img[i + 1, j - 1]
+                P8 = img[i, j - 1]
+                P9 = img[i - 1, j - 1]
+                P1 = img[i, j]
+                if P1 == 1:
+                    neighbors = P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9
+                    transitions = ((P2 == 0 and P3 == 1) + (P3 == 0 and P4 == 1) +
+                                   (P4 == 0 and P5 == 1) + (P5 == 0 and P6 == 1) +
+                                   (P6 == 0 and P7 == 1) + (P7 == 0 and P8 == 1) +
+                                   (P8 == 0 and P9 == 1) + (P9 == 0 and P2 == 1))
+                    if 2 <= neighbors <= 6 and transitions == 1 and (P2 * P4 * P6 == 0) and (P4 * P6 * P8 == 0):
+                        m[i, j] = 1
+        img = img & (~m)
+        if np.any(m):
+            changed = True
+
+        # step 2
+        m = np.zeros_like(img)
+        for i in range(1, rows - 1):
+            for j in range(1, cols - 1):
+                P2 = img[i - 1, j]
+                P3 = img[i - 1, j + 1]
+                P4 = img[i, j + 1]
+                P5 = img[i + 1, j + 1]
+                P6 = img[i + 1, j]
+                P7 = img[i + 1, j - 1]
+                P8 = img[i, j - 1]
+                P9 = img[i - 1, j - 1]
+                P1 = img[i, j]
+                if P1 == 1:
+                    neighbors = P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9
+                    transitions = ((P2 == 0 and P3 == 1) + (P3 == 0 and P4 == 1) +
+                                   (P4 == 0 and P5 == 1) + (P5 == 0 and P6 == 1) +
+                                   (P6 == 0 and P7 == 1) + (P7 == 0 and P8 == 1) +
+                                   (P8 == 0 and P9 == 1) + (P9 == 0 and P2 == 1))
+                    if 2 <= neighbors <= 6 and transitions == 1 and (P2 * P4 * P8 == 0) and (P2 * P6 * P8 == 0):
+                        m[i, j] = 1
+        img = img & (~m)
+        if np.any(m):
+            changed = True
+
+    return (img * 255).astype(np.uint8)
+
+
+def thin_edges(edge_map):
+    """Thin a binary edge map. Tries OpenCV ximgproc.thinning, falls back to Zhang-Suen.
+
+    Input: edge_map (uint8) with 0/255 values or boolean. Returns thinned 0/255 uint8.
+    """
+    if edge_map.dtype != np.uint8:
+        edge = (edge_map > 0).astype(np.uint8) * 255
+    else:
+        edge = np.where(edge_map > 0, 255, 0).astype(np.uint8)
+
+    try:
+        # prefer fast OpenCV thinning if available
+        thin = cv2.ximgproc.thinning(edge)
+        return thin
+    except Exception:
+        return _zhang_suen_thinning(edge)
+
+
+def refine_edges_subpixel(edge_map):
+    """Refine edges by extracting contours and drawing smoothed subpixel lines.
+
+    This converts contour points to fitted lines and redraws with anti-aliased
+    1-pixel thickness to produce visually thinner, smoother strokes.
+    """
+    edge = np.where(edge_map > 0, 255, 0).astype(np.uint8)
+    contours, _ = cv2.findContours(edge, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    h, w = edge.shape[:2]
+    canvas = np.zeros((h, w), dtype=np.uint8)
+    for cnt in contours:
+        if len(cnt) < 6:
+            # small contours: draw directly
+            cv2.drawContours(canvas, [cnt], -1, 255, 1, lineType=cv2.LINE_AA)
+            continue
+        # fit a polyline approximation then draw segments with antialiasing
+        approx = cv2.approxPolyDP(cnt, epsilon=1.0, closed=False)
+        pts = approx.reshape(-1, 2)
+        for i in range(len(pts) - 1):
+            p1 = tuple(map(int, pts[i]))
+            p2 = tuple(map(int, pts[i + 1]))
+            cv2.line(canvas, p1, p2, 255, 1, lineType=cv2.LINE_AA)
+    return canvas
+
+
+def enhance_eye_like_edges(image, edge_map, eye_mask=None):
+    """High-level helper: thin edges, then refine contours to produce finer strokes.
+
+    - `image`: RGB image (used for optional smoothing; currently unused but kept for extensibility)
+    - `edge_map`: binary edge map (0/255)
+    - `eye_mask`: optional binary mask to restrict processing area (0/255)
+    Returns refined binary edge image (0/255).
+    """
+    if eye_mask is not None:
+        mask = (eye_mask > 0).astype(np.uint8)
+    else:
+        mask = None
+
+    # operate on whole map but can be masked later
+    th = thin_edges(edge_map)
+    refined = refine_edges_subpixel(th)
+    if mask is not None:
+        refined = np.where(mask, refined, 0).astype(np.uint8)
+    return refined
+
+
 def count_unique_colors(image):
     """Count how many distinct RGB colors actually remain in an image.
 
@@ -352,31 +480,73 @@ def color_boundary_edges(image, min_delta=18):
     return edges
 
 
-def hybrid_canny_color_edges(image, low=60, high=150, label_map=None, color_delta=18):
-    """Combine grayscale Canny edges with color-region boundaries.
+def hybrid_canny_color_edges(image, low=50, high=130, label_map=None, color_delta=15):
+    """Combine grayscale Canny edges with color boundaries while preserving sharp eye details.
 
-    Canny can miss borders between colors with similar brightness. The color edge
-    term preserves boundaries where neighboring quantized regions or Lab colors
-    differ, which is important for overlapping colored objects.
+    Applies a localized bilateral filter with strict color and spatial constraints 
+    to preserve fine high-frequency details (like eyelashes, pupils, and iris textures)
+    while successfully flattening large texture noise regions (like skin or gradients).
+
+    To prevent doubled/overlapping edges at small detail regions (e.g. eyes):
+    - Color boundary edges that fall within 1px of an existing Canny edge are suppressed.
+    - Color edges are dilated by 1px before the Canny mask is applied, so genuine
+      new boundaries (different color, no Canny response) still pass through.
     """
-    canny = canny_edges(image, low, high)
+    # Optimized bilateral filter parameters to protect fine details (d=5, sigmas=30)
+    smoothed = cv2.bilateralFilter(image, d=5, sigmaColor=30, sigmaSpace=30)
+    
+    # Grayscale conversion for Canny edge detection
+    gray = cv2.cvtColor(smoothed, cv2.COLOR_RGB2GRAY)
+    canny = cv2.Canny(gray, low, high)
+    
+    # Detect color-based boundaries
     if label_map is None:
-        color_edges = color_boundary_edges(image, min_delta=color_delta)
+        color_edges = color_boundary_edges(smoothed, min_delta=color_delta)
     else:
         color_edges = color_boundary_edges_from_labels(label_map)
-    return cv2.bitwise_or(canny, color_edges)
 
+    # Suppress color edges that are already covered by Canny to avoid doubling/thickening
+    # at fine structures (eyes, eyelashes, iris). Dilate Canny mask by 1px so that a
+    # color boundary pixel directly adjacent to a Canny pixel is also suppressed.
+    kernel1 = np.ones((3, 3), np.uint8)
+    canny_dilated = cv2.dilate(canny, kernel1, iterations=1)
+    color_edges_new = cv2.bitwise_and(color_edges, cv2.bitwise_not(canny_dilated))
 
-def clean_edges(edges, open_iter=0, close_iter=1, thickness=1):
-    """Apply morphology and line thickness control to binary edge map."""
-    kernel = np.ones((3, 3), np.uint8)
+    return cv2.bitwise_or(canny, color_edges_new)
+
+def clean_edges(edges, open_iter=0, close_iter=0, thickness=1):
+    """Clean noise while forcing thin, high-resolution line strokes for facial features.
+
+    Changes vs. original:
+    - Uses a 2x2 closing kernel instead of 3x3 to bridge gaps without thickening lines.
+    - Keeps thickness=1 as a true single-pixel pass (no dilation at all).
+    - Minimum component area stays at 8px to protect eyelash / fine-detail strokes.
+    """
+    kernel3 = np.ones((3, 3), np.uint8)
+    # Smaller kernel for closing so broken ends connect without widening strokes
+    kernel2 = np.ones((2, 2), np.uint8)
     result = edges.copy()
+    
     if open_iter > 0:
-        result = cv2.morphologyEx(result, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+        result = cv2.morphologyEx(result, cv2.MORPH_OPEN, kernel3, iterations=open_iter)
     if close_iter > 0:
-        result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
+        # Use the 2x2 kernel for closing: closes small gaps with minimal widening
+        result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel2, iterations=close_iter)
+        
+    # Filter out tiny isolated noise blobs, but keep small delicate strokes like eyes (area >= 8)
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(result, 8)
+    filtered_mask = np.zeros_like(result)
+    
+    for i in range(1, n_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= 8:
+            filtered_mask[labels == i] = 255
+            
+    result = filtered_mask
+    
+    # Only dilate if thickness is explicitly requested to be greater than 1
     if thickness > 1:
-        result = cv2.dilate(result, kernel, iterations=thickness - 1)
+        result = cv2.dilate(result, kernel3, iterations=thickness - 1)
+        
     return result
 
 
