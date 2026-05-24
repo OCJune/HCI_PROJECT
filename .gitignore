@@ -30,3 +30,6 @@ ENV/
 # 로그 / 임시 파일
 *.log
 *.tmp
+
+# Codex / OMX local runtime state
+.omx/
