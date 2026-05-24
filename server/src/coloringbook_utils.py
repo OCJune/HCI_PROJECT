@@ -9,6 +9,23 @@ import numpy as np
 
 OUTPUT_DIR = "outputs"
 DATA_DIR = "data"
+DEFAULT_COLOR_COUNT = 10
+
+
+def validate_color_count(k, min_k=2):
+    """Return a valid color count for quantization experiments.
+
+    The final UI can recommend an image-specific minimum K, but the low-level
+    quantization functions should still allow small K values so notebooks can
+    measure when an image starts to become recognizable.
+    """
+    try:
+        k = int(k)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"K must be an integer color count, got {k!r}") from exc
+    if k < min_k:
+        raise ValueError(f"K must be at least {min_k}.")
+    return k
 
 
 def ensure_dirs():
@@ -212,8 +229,9 @@ def color_region_edge_preview(line_image, region_map, regions, palette=None, thi
     return canvas
 
 
-def kmeans_quantization(image, k=10, attempts=3):
+def kmeans_quantization(image, k=DEFAULT_COLOR_COUNT, attempts=3):
     """Color quantization using OpenCV K-Means clustering."""
+    k = validate_color_count(k)
     pixels = image.reshape((-1, 3)).astype(np.float32)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.2)
     _, labels, centers = cv2.kmeans(
@@ -224,8 +242,9 @@ def kmeans_quantization(image, k=10, attempts=3):
     return quantized, centers
 
 
-def kmeans_quantization_with_labels(image, k=10, attempts=3):
+def kmeans_quantization_with_labels(image, k=DEFAULT_COLOR_COUNT, attempts=3):
     """Return quantized image, palette, and per-pixel color label map."""
+    k = validate_color_count(k)
     pixels = image.reshape((-1, 3)).astype(np.float32)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.2)
     _, labels, centers = cv2.kmeans(
@@ -237,8 +256,9 @@ def kmeans_quantization_with_labels(image, k=10, attempts=3):
     return quantized, centers, label_map
 
 
-def posterization(image, k=10):
+def posterization(image, k=DEFAULT_COLOR_COUNT):
     """Fast uniform posterization. K is mapped to a per-channel level count."""
+    k = validate_color_count(k)
     levels = max(2, int(np.ceil(k ** (1 / 3))))
     bins = np.linspace(0, 256, levels + 1)
     centers = ((bins[:-1] + bins[1:]) / 2).astype(np.uint8)
@@ -266,8 +286,9 @@ def _median_cut_box(pixels, target_boxes):
     return list(boxes)
 
 
-def median_cut_quantization(image, k=10, sample_size=60000):
+def median_cut_quantization(image, k=DEFAULT_COLOR_COUNT, sample_size=60000):
     """Educational Median Cut implementation for comparison."""
+    k = validate_color_count(k)
     pixels = image.reshape(-1, 3)
     if len(pixels) > sample_size:
         rng = np.random.default_rng(7)
@@ -869,10 +890,11 @@ def region_metrics(regions, image_shape, small_area=300):
     }
 
 
-def complexity_by_k(image, k_values=(5, 10, 20), min_area=120):
+def complexity_by_k(image, k_values=(5, DEFAULT_COLOR_COUNT, 20), min_area=120):
     """Measure how color count changes runtime, edge density, and region complexity."""
     rows = []
     for k in k_values:
+        k = validate_color_count(k)
         (quantized, _, labels), q_time = timed_call(kmeans_quantization_with_labels, image, k)
         edges, e_time = timed_call(hybrid_canny_color_edges, quantized, 60, 150, labels)
         edges = clean_edges(edges, close_iter=1, thickness=1)
