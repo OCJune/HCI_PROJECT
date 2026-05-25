@@ -33,6 +33,11 @@ ENV/
 <<<<<<< HEAD
 =======
 
+# Backend runtime artifacts
+server/uploads/
+server/generated/
+server/generated_test/
+
 # Codex / OMX local runtime state
 .omx/
 >>>>>>> 5bf42162e86d96450840b895ddca9b2f9c209fe3
