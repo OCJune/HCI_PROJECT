@@ -83,6 +83,10 @@ AUTO_MAX_WORKING_LONG_EDGE = 2400
 AUTO_HIGH_DETAIL_EDGE_DENSITY = 0.075
 AUTO_LOW_DETAIL_EDGE_DENSITY = 0.028
 AUTO_BLUR_VARIANCE_THRESHOLD = 85.0
+AUTO_SIMPLE_COLOR_LAB_SPREAD = 45.0
+AUTO_SIMPLE_EDGE_DENSITY = 0.060
+AUTO_SIMPLE_K_UPPER_BOUND = 18
+AUTO_SIMPLE_BACKGROUND_MERGE_DISTANCE = 42.0
 
 
 def resize_to_long_edge(image, target_long_edge):
@@ -122,6 +126,8 @@ def analyze_image_profile(image, max_sample_long_edge=900):
         rng = np.random.default_rng(11)
         lab_pixels = lab_pixels[rng.choice(len(lab_pixels), 30000, replace=False)]
     lab_spread = float(np.mean(np.linalg.norm(lab_pixels - lab_pixels.mean(axis=0), axis=1)))
+    coarse_lab = (lab.reshape(-1, 3).astype(np.uint16) // 16).astype(np.uint16)
+    coarse_lab_colors = int(len(np.unique(coarse_lab, axis=0)))
 
     return {
         "original_width": int(w),
@@ -131,6 +137,7 @@ def analyze_image_profile(image, max_sample_long_edge=900):
         "edge_density": edge_density_value,
         "blur_variance": blur_variance,
         "lab_spread": lab_spread,
+        "coarse_lab_colors": coarse_lab_colors,
     }
 
 
@@ -142,6 +149,10 @@ def choose_processing_policy(profile, requested_max_size=None):
     is_high_detail = edge_density_value >= AUTO_HIGH_DETAIL_EDGE_DENSITY
     is_low_detail = edge_density_value <= AUTO_LOW_DETAIL_EDGE_DENSITY
     is_blurry = blur_variance < AUTO_BLUR_VARIANCE_THRESHOLD
+    is_simple_color_art = (
+        float(profile["lab_spread"]) <= AUTO_SIMPLE_COLOR_LAB_SPREAD
+        and edge_density_value <= AUTO_SIMPLE_EDGE_DENSITY
+    )
 
     if requested_max_size is not None and requested_max_size > 0:
         target_long_edge = min(original_long_edge, int(requested_max_size))
@@ -158,6 +169,8 @@ def choose_processing_policy(profile, requested_max_size=None):
         target_long_edge = AUTO_MIN_WORKING_LONG_EDGE
 
     detail_boost = "high" if (is_small_source or is_high_detail) else "normal"
+    if is_simple_color_art:
+        detail_boost = "simple"
     if is_blurry and not is_high_detail:
         detail_boost = "soft"
 
@@ -173,6 +186,13 @@ def choose_processing_policy(profile, requested_max_size=None):
         source_high = 82
         closed_low = 38
         closed_high = 112
+        connect_kernel = 5
+        connect_iter = 1
+    elif detail_boost == "simple":
+        source_low = 46
+        source_high = 130
+        closed_low = 58
+        closed_high = 155
         connect_kernel = 5
         connect_iter = 1
     elif detail_boost == "soft":
@@ -192,6 +212,11 @@ def choose_processing_policy(profile, requested_max_size=None):
         "closed_detail_high": int(closed_high),
         "connect_kernel": int(connect_kernel),
         "connect_iter": int(connect_iter),
+        "simple_color_art": bool(is_simple_color_art),
+        "k_upper_bound": AUTO_SIMPLE_K_UPPER_BOUND if is_simple_color_art else K_UPPER_BOUND,
+        "difficulty_margins": {"easy": 0, "normal": 4, "hard": 8}
+        if is_simple_color_art
+        else DIFFICULTY_MARGINS,
     }
 
 
@@ -270,10 +295,13 @@ def estimate_min_k_from_smoothed_colors(image, max_sample=40000, rgb_bin_size=16
     }
 
 
-def difficulty_k_values(min_k):
+def difficulty_k_values(min_k, policy=None):
+    policy = policy or {}
+    margins = policy.get("difficulty_margins", DIFFICULTY_MARGINS)
+    upper_bound = int(policy.get("k_upper_bound", K_UPPER_BOUND))
     return {
-        name: int(np.clip(min_k + margin, MIN_K_LOWER_BOUND, K_UPPER_BOUND))
-        for name, margin in DIFFICULTY_MARGINS.items()
+        name: int(np.clip(min_k + margin, MIN_K_LOWER_BOUND, upper_bound))
+        for name, margin in margins.items()
     }
 
 
@@ -286,6 +314,24 @@ def upscale_for_segmentation_output(image, quantized, labels, palette, scale):
     up_labels = cv2.resize(labels.astype(np.int32), size, interpolation=cv2.INTER_NEAREST).astype(np.int32)
     up_quantized = palette[up_labels]
     return up_image, up_quantized, up_labels
+
+
+def merge_background_similar_labels(labels, palette, image, distance_threshold):
+    background_color = estimate_background_color(image).astype(np.float32)
+    palette_float = palette.astype(np.float32)
+    distances = np.linalg.norm(palette_float - background_color, axis=1)
+    background_label = int(np.argmin(distances))
+    merge_labels = np.where(distances <= float(distance_threshold))[0]
+    if merge_labels.size == 0:
+        return labels, palette
+
+    merged_labels = labels.copy()
+    for label_id in merge_labels:
+        merged_labels[labels == int(label_id)] = background_label
+
+    merged_palette = palette.copy()
+    merged_palette[background_label] = np.clip(background_color, 0, 255).astype(np.uint8)
+    return merged_labels, merged_palette
 
 
 def object_first_edges(label_map, min_area, close_kernel=5):
@@ -627,6 +673,14 @@ def render_difficulty(image, simplified, target_k, policy=None):
     min_colorable_region_area = max(1, int(round(MIN_COLORABLE_REGION_AREA * area_scale)))
 
     kmeans_img, palette, labels = kmeans_quantization_with_labels(simplified, target_k)
+    if policy.get("simple_color_art", False):
+        labels, palette = merge_background_similar_labels(
+            labels,
+            palette,
+            simplified,
+            AUTO_SIMPLE_BACKGROUND_MERGE_DISTANCE,
+        )
+        kmeans_img = palette[labels]
     up_image, up_kmeans, up_labels = upscale_for_segmentation_output(
         image,
         kmeans_img,
@@ -749,7 +803,7 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
         )
         simplified = smooth_before_kmeans(image)
         min_k, _ = estimate_min_k_from_smoothed_colors(simplified)
-        k_values = difficulty_k_values(min_k)
+        k_values = difficulty_k_values(min_k, policy=policy)
         print(
             (
                 f"[{image_path.name}] "
@@ -757,6 +811,7 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
                 f"working={profile['working_width']}x{profile['working_height']} "
                 f"edge_density={profile['edge_density']:.4f} "
                 f"blur={profile['blur_variance']:.1f} "
+                f"lab_spread={profile['lab_spread']:.1f} "
                 f"policy={policy['detail_boost']} "
                 f"minK={min_k}, K={k_values}"
             ),
@@ -778,6 +833,7 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
                 "original_size": f"{profile['original_width']}x{profile['original_height']}",
                 "working_size": f"{profile['working_width']}x{profile['working_height']}",
                 "policy": policy["detail_boost"],
+                "k_upper_bound": policy["k_upper_bound"],
                 "output": output_path.name,
             })
         print(f"  done in {time.perf_counter() - start:.1f}s", flush=True)
@@ -793,6 +849,7 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
         "original_size",
         "working_size",
         "policy",
+        "k_upper_bound",
         "output",
     ]
     with summary_path.open("w", encoding="utf-8") as f:
