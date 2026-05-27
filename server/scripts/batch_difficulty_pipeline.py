@@ -67,6 +67,15 @@ SEGMENTATION_DARK_REGION_MIN_AREA = 6
 SEGMENTATION_DARK_REGION_MAX_AREA = 2400
 SEGMENTATION_DARK_REGION_MAX_ASPECT = 8.0
 SEGMENTATION_DARK_REGION_MIN_EXTENT = 0.08
+SEGMENTATION_CLOSED_DETAIL_LOW = 45
+SEGMENTATION_CLOSED_DETAIL_HIGH = 130
+SEGMENTATION_CLOSED_DETAIL_MIN_PIXELS = 8
+SEGMENTATION_CLOSED_DETAIL_MAX_PIXELS = 1800
+SEGMENTATION_CLOSED_DETAIL_MIN_CONTOUR_AREA = 18
+SEGMENTATION_CLOSED_DETAIL_MAX_CONTOUR_AREA = 9000
+SEGMENTATION_CLOSED_DETAIL_MAX_SPAN = 220
+SEGMENTATION_CLOSED_DETAIL_MIN_EXTENT = 0.06
+SEGMENTATION_CLOSED_DETAIL_CLOSE_KERNEL = 5
 
 
 def load_image_preserve_size(path):
@@ -273,6 +282,63 @@ def dark_detail_region_edges(
     return promoted
 
 
+def closed_detail_shape_edges(
+    image,
+    object_edges,
+    low=SEGMENTATION_CLOSED_DETAIL_LOW,
+    high=SEGMENTATION_CLOSED_DETAIL_HIGH,
+    min_pixels=SEGMENTATION_CLOSED_DETAIL_MIN_PIXELS,
+    max_pixels=SEGMENTATION_CLOSED_DETAIL_MAX_PIXELS,
+    min_contour_area=SEGMENTATION_CLOSED_DETAIL_MIN_CONTOUR_AREA,
+    max_contour_area=SEGMENTATION_CLOSED_DETAIL_MAX_CONTOUR_AREA,
+    max_span=SEGMENTATION_CLOSED_DETAIL_MAX_SPAN,
+    min_extent=SEGMENTATION_CLOSED_DETAIL_MIN_EXTENT,
+    close_kernel=SEGMENTATION_CLOSED_DETAIL_CLOSE_KERNEL,
+):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    edges = cv2.Canny(gray, low, high)
+    for channel in cv2.split(lab):
+        edges = cv2.bitwise_or(edges, cv2.Canny(channel, low, high))
+
+    object_guard = cv2.dilate(object_edges, np.ones((3, 3), np.uint8), iterations=1)
+    edges = cv2.bitwise_and(edges, cv2.bitwise_not(object_guard))
+
+    kernel_size = max(3, int(close_kernel))
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, close, iterations=1)
+
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_edges, 8)
+    promoted = np.zeros_like(edges)
+    for component_id in range(1, n_labels):
+        pixels = int(stats[component_id, cv2.CC_STAT_AREA])
+        if not (min_pixels <= pixels <= max_pixels):
+            continue
+
+        x = int(stats[component_id, cv2.CC_STAT_LEFT])
+        y = int(stats[component_id, cv2.CC_STAT_TOP])
+        w = int(stats[component_id, cv2.CC_STAT_WIDTH])
+        h = int(stats[component_id, cv2.CC_STAT_HEIGHT])
+        if max(w, h) > max_span:
+            continue
+        extent = pixels / max(1, w * h)
+        if extent < min_extent:
+            continue
+
+        component = (labels[y:y + h, x:x + w] == component_id).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            contour_area = cv2.contourArea(contour)
+            if not (min_contour_area <= contour_area <= max_contour_area):
+                continue
+            contour = contour + np.array([[[x, y]]], dtype=contour.dtype)
+            cv2.drawContours(promoted, [contour], -1, 255, 1, cv2.LINE_8)
+
+    return promoted
+
+
 def border_connected_region_ids(region_map):
     border_ids = np.concatenate([
         region_map[0, :],
@@ -434,9 +500,18 @@ def render_difficulty(image, simplified, target_k):
         min_area=int(round(SEGMENTATION_DARK_REGION_MIN_AREA * area_scale)),
         max_area=int(round(SEGMENTATION_DARK_REGION_MAX_AREA * area_scale)),
     )
+    closed_detail_edges = closed_detail_shape_edges(
+        up_image,
+        object_raw,
+        min_pixels=int(round(SEGMENTATION_CLOSED_DETAIL_MIN_PIXELS * area_scale)),
+        max_pixels=int(round(SEGMENTATION_CLOSED_DETAIL_MAX_PIXELS * area_scale)),
+        min_contour_area=SEGMENTATION_CLOSED_DETAIL_MIN_CONTOUR_AREA * area_scale,
+        max_contour_area=SEGMENTATION_CLOSED_DETAIL_MAX_CONTOUR_AREA * area_scale,
+        max_span=int(round(SEGMENTATION_CLOSED_DETAIL_MAX_SPAN * SEGMENTATION_OUTPUT_SCALE)),
+    )
     segmentation_source_edges = cv2.bitwise_or(
-        cv2.bitwise_or(object_raw, source_boundary_edges),
-        dark_region_edges,
+        cv2.bitwise_or(cv2.bitwise_or(object_raw, source_boundary_edges), dark_region_edges),
+        closed_detail_edges,
     )
     object_seg_connected = connect_segmentation_edges(
         segmentation_source_edges,
