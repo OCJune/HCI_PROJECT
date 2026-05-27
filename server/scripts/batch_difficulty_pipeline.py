@@ -42,8 +42,9 @@ SEGMENTATION_CONNECT_KERNEL = 3
 SEGMENTATION_CONNECT_ITER = 1
 SEGMENTATION_EDGE_THICKNESS = 2
 SEGMENTATION_LINE_COLOR = (0, 0, 0)
-DETAIL_LINE_GRAY = 0
+DETAIL_LINE_GRAY = 150
 MIN_REGION_AREA = 160
+MIN_COLORABLE_REGION_AREA = 1
 DETAIL_RENDER_MIN_AREA = 2
 DETAIL_RENDER_MIN_ARC_LENGTH = 6
 DETAIL_RENDER_MIN_POINTS = 3
@@ -55,6 +56,17 @@ DETAIL_MAX_AREA = 1200
 DARK_DETAIL_THRESHOLD = 70
 DARK_DETAIL_MIN_AREA = 5
 DARK_DETAIL_MAX_AREA = 900
+SEGMENTATION_DETAIL_CANNY_LOW = 35
+SEGMENTATION_DETAIL_CANNY_HIGH = 95
+SEGMENTATION_DETAIL_MIN_PIXELS = 10
+SEGMENTATION_DETAIL_MAX_PIXELS = 2600
+SEGMENTATION_DETAIL_MIN_SPAN = 28
+SEGMENTATION_DETAIL_MAX_SPAN = 900
+SEGMENTATION_DETAIL_NON_DARK_THRESHOLD = 82
+SEGMENTATION_DARK_REGION_MIN_AREA = 6
+SEGMENTATION_DARK_REGION_MAX_AREA = 2400
+SEGMENTATION_DARK_REGION_MAX_ASPECT = 8.0
+SEGMENTATION_DARK_REGION_MIN_EXTENT = 0.08
 
 
 def load_image_preserve_size(path):
@@ -175,6 +187,92 @@ def detail_expression_edges(
     return cv2.bitwise_or(filtered_edges, filtered_dark)
 
 
+def source_detail_boundary_edges(
+    image,
+    object_edges,
+    low=SEGMENTATION_DETAIL_CANNY_LOW,
+    high=SEGMENTATION_DETAIL_CANNY_HIGH,
+    min_pixels=SEGMENTATION_DETAIL_MIN_PIXELS,
+    max_pixels=SEGMENTATION_DETAIL_MAX_PIXELS,
+    min_span=SEGMENTATION_DETAIL_MIN_SPAN,
+    max_span=SEGMENTATION_DETAIL_MAX_SPAN,
+    non_dark_threshold=SEGMENTATION_DETAIL_NON_DARK_THRESHOLD,
+):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    edges = cv2.Canny(gray, low, high)
+    for channel in cv2.split(lab):
+        edges = cv2.bitwise_or(edges, cv2.Canny(channel, low, high))
+
+    non_dark = (gray > non_dark_threshold).astype(np.uint8) * 255
+    edges = cv2.bitwise_and(edges, non_dark)
+    object_guard = cv2.dilate(object_edges, np.ones((3, 3), np.uint8), iterations=1)
+    edges = cv2.bitwise_and(edges, cv2.bitwise_not(object_guard))
+
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, 8)
+    promoted = np.zeros_like(edges)
+    for component_id in range(1, n_labels):
+        pixels = int(stats[component_id, cv2.CC_STAT_AREA])
+        if not (min_pixels <= pixels <= max_pixels):
+            continue
+
+        x = int(stats[component_id, cv2.CC_STAT_LEFT])
+        y = int(stats[component_id, cv2.CC_STAT_TOP])
+        w = int(stats[component_id, cv2.CC_STAT_WIDTH])
+        h = int(stats[component_id, cv2.CC_STAT_HEIGHT])
+        span = max(w, h)
+        if not (min_span <= span <= max_span):
+            continue
+
+        component = (labels[y:y + h, x:x + w] == component_id).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        for contour in contours:
+            if cv2.arcLength(contour, False) < min_span:
+                continue
+            contour = contour + np.array([[[x, y]]], dtype=contour.dtype)
+            cv2.drawContours(promoted, [contour], -1, 255, 1, cv2.LINE_8)
+
+    return promoted
+
+
+def dark_detail_region_edges(
+    image,
+    dark_threshold=DARK_DETAIL_THRESHOLD,
+    min_area=SEGMENTATION_DARK_REGION_MIN_AREA,
+    max_area=SEGMENTATION_DARK_REGION_MAX_AREA,
+    max_aspect=SEGMENTATION_DARK_REGION_MAX_ASPECT,
+    min_extent=SEGMENTATION_DARK_REGION_MIN_EXTENT,
+):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    dark = (gray < dark_threshold).astype(np.uint8) * 255
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark, 8)
+    promoted = np.zeros_like(dark)
+
+    for component_id in range(1, n_labels):
+        area = int(stats[component_id, cv2.CC_STAT_AREA])
+        if not (min_area <= area <= max_area):
+            continue
+
+        x = int(stats[component_id, cv2.CC_STAT_LEFT])
+        y = int(stats[component_id, cv2.CC_STAT_TOP])
+        w = int(stats[component_id, cv2.CC_STAT_WIDTH])
+        h = int(stats[component_id, cv2.CC_STAT_HEIGHT])
+        aspect = max(w, h) / max(1, min(w, h))
+        extent = area / max(1, w * h)
+        if aspect > max_aspect or extent < min_extent:
+            continue
+
+        component = (labels[y:y + h, x:x + w] == component_id).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            if len(contour) < 2:
+                continue
+            contour = contour + np.array([[[x, y]]], dtype=contour.dtype)
+            cv2.drawContours(promoted, [contour], -1, 255, 1, cv2.LINE_8)
+
+    return promoted
+
+
 def border_connected_region_ids(region_map):
     border_ids = np.concatenate([
         region_map[0, :],
@@ -240,10 +338,19 @@ def draw_simplified_boundary_layer(canvas, region_map, line_color=SEGMENTATION_L
     return canvas
 
 
-def draw_paint_by_number_style(detail_edges, regions, region_map, min_region_area):
+def draw_paint_by_number_style(
+    detail_edges,
+    regions,
+    region_map,
+    min_region_area,
+    segmentation_edges=None,
+):
     h, w = region_map.shape[:2]
     canvas = np.full((h, w, 3), 255, dtype=np.uint8)
-    draw_simplified_boundary_layer(canvas, region_map)
+    if segmentation_edges is None:
+        draw_simplified_boundary_layer(canvas, region_map)
+    else:
+        canvas[segmentation_edges > 0] = SEGMENTATION_LINE_COLOR
 
     detail = clean_edges(detail_edges, open_iter=0, close_iter=0, thickness=1)
     detail_contours, _ = cv2.findContours(detail, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
@@ -282,10 +389,29 @@ def draw_paint_by_number_style(detail_edges, regions, region_map, min_region_are
     return canvas
 
 
+def draw_segmentation_filled_preview(segmentation_edges, regions, region_map, label_map, palette):
+    h, w = region_map.shape[:2]
+    canvas = np.full((h, w, 3), 255, dtype=np.uint8)
+    for region in regions:
+        mask = region_map == int(region["id"])
+        if not np.any(mask):
+            continue
+        labels_in_region = label_map[mask]
+        if labels_in_region.size == 0:
+            continue
+        color_label = int(np.bincount(labels_in_region.astype(np.int32)).argmax())
+        if 0 <= color_label < len(palette):
+            canvas[mask] = palette[color_label]
+
+    canvas[segmentation_edges > 0] = SEGMENTATION_LINE_COLOR
+    return canvas
+
+
 def render_difficulty(image, simplified, target_k):
     area_scale = max(1.0, float(SEGMENTATION_OUTPUT_SCALE) ** 2)
     object_min_area = int(round(OBJECT_MIN_AREA * area_scale))
     min_region_area = int(round(MIN_REGION_AREA * area_scale))
+    min_colorable_region_area = max(1, int(round(MIN_COLORABLE_REGION_AREA * area_scale)))
 
     kmeans_img, palette, labels = kmeans_quantization_with_labels(simplified, target_k)
     up_image, up_kmeans, up_labels = upscale_for_segmentation_output(
@@ -297,8 +423,23 @@ def render_difficulty(image, simplified, target_k):
     )
 
     object_raw = object_first_edges(up_labels, min_area=object_min_area, close_kernel=OBJECT_CLOSE_KERNEL)
+    up_simplified = cv2.resize(
+        simplified,
+        (up_labels.shape[1], up_labels.shape[0]),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    source_boundary_edges = source_detail_boundary_edges(up_simplified, object_raw)
+    dark_region_edges = dark_detail_region_edges(
+        up_image,
+        min_area=int(round(SEGMENTATION_DARK_REGION_MIN_AREA * area_scale)),
+        max_area=int(round(SEGMENTATION_DARK_REGION_MAX_AREA * area_scale)),
+    )
+    segmentation_source_edges = cv2.bitwise_or(
+        cv2.bitwise_or(object_raw, source_boundary_edges),
+        dark_region_edges,
+    )
     object_seg_connected = connect_segmentation_edges(
-        object_raw,
+        segmentation_source_edges,
         kernel_size=SEGMENTATION_CONNECT_KERNEL,
         iterations=SEGMENTATION_CONNECT_ITER,
     )
@@ -308,7 +449,7 @@ def render_difficulty(image, simplified, target_k):
         close_iter=1,
         thickness=SEGMENTATION_EDGE_THICKNESS,
     )
-    object_final_clean = clean_edges(object_raw, open_iter=0, close_iter=1, thickness=1)
+    object_final_clean = clean_edges(segmentation_source_edges, open_iter=0, close_iter=1, thickness=1)
     detail_edges = detail_expression_edges(
         up_image,
         object_final_clean,
@@ -322,7 +463,7 @@ def render_difficulty(image, simplified, target_k):
     )
 
     segmentation_line_image = cv2.bitwise_not(object_seg_clean)
-    region_map, regions = segment_connected_components(segmentation_line_image, min_region_area)
+    region_map, regions = segment_connected_components(segmentation_line_image, min_colorable_region_area)
     background_color = estimate_background_color(up_kmeans)
     regions = assign_region_color_numbers(
         regions,
@@ -338,11 +479,24 @@ def render_difficulty(image, simplified, target_k):
         if int(region["id"]) in background_ids:
             region["is_background"] = True
 
-    result = draw_paint_by_number_style(detail_edges, regions, region_map, min_region_area)
+    result = draw_paint_by_number_style(
+        detail_edges,
+        regions,
+        region_map,
+        min_region_area,
+        segmentation_edges=object_seg_clean,
+    )
+    filled_preview = draw_segmentation_filled_preview(
+        object_seg_clean,
+        regions,
+        region_map,
+        up_labels,
+        palette,
+    )
     numbered_regions = [region for region in regions if not region.get("is_background", False)]
     metrics = region_metrics(numbered_regions, up_image.shape, small_area=300)
     metrics["edge_density"] = edge_density(object_final_clean)
-    return result, metrics
+    return result, filled_preview, metrics
 
 
 def run_batch(data_dir, output_dir):
@@ -365,9 +519,11 @@ def run_batch(data_dir, output_dir):
         k_values = difficulty_k_values(min_k)
         print(f"[{image_path.name}] minK={min_k}, K={k_values}", flush=True)
         for difficulty, target_k in k_values.items():
-            result, metrics = render_difficulty(image, simplified, target_k)
+            result, filled_preview, metrics = render_difficulty(image, simplified, target_k)
             output_path = output_dir / f"{image_path.stem}_{difficulty}_k{target_k}.png"
             save_image_rgb(str(output_path), result)
+            filled_output_path = output_dir / f"{image_path.stem}_{difficulty}_k{target_k}_segmentation_filled.png"
+            save_image_rgb(str(filled_output_path), filled_preview)
             summary_rows.append({
                 "image": image_path.name,
                 "difficulty": difficulty,
