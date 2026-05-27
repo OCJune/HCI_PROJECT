@@ -107,6 +107,8 @@ def resize_to_long_edge(image, target_long_edge):
 
 
 def analyze_image_profile(image, max_sample_long_edge=900):
+    # Stage 1: measure input complexity on a bounded sample so policy selection
+    # stays fast even when the uploaded image is very large.
     h, w = image.shape[:2]
     long_edge = max(h, w)
     sample, sample_scale = resize_to_long_edge(
@@ -142,6 +144,8 @@ def analyze_image_profile(image, max_sample_long_edge=900):
 
 
 def choose_processing_policy(profile, requested_max_size=None):
+    # Stage 2: convert image measurements into service-safe processing knobs.
+    # The pipeline should adapt by image type instead of relying on filename rules.
     original_long_edge = int(profile["original_long_edge"])
     edge_density_value = float(profile["edge_density"])
     blur_variance = float(profile["blur_variance"])
@@ -155,6 +159,7 @@ def choose_processing_policy(profile, requested_max_size=None):
     )
 
     if requested_max_size is not None and requested_max_size > 0:
+        # Explicit max size is treated as an operational upper bound.
         target_long_edge = min(original_long_edge, int(requested_max_size))
     elif is_small_source:
         target_long_edge = AUTO_MIN_WORKING_LONG_EDGE
@@ -170,6 +175,8 @@ def choose_processing_policy(profile, requested_max_size=None):
 
     detail_boost = "high" if (is_small_source or is_high_detail) else "normal"
     if is_simple_color_art:
+        # Simple flat-color art is vulnerable to over-segmentation, so keep
+        # detail promotion and color-count growth conservative.
         detail_boost = "simple"
     if is_blurry and not is_high_detail:
         detail_boost = "soft"
@@ -221,6 +228,8 @@ def choose_processing_policy(profile, requested_max_size=None):
 
 
 def load_image_preserve_size(path, max_size=None, auto_policy=True):
+    # Stage 3: load the upload, choose a policy, then resize to the working
+    # resolution used for quantization and segmentation.
     bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if bgr is None:
         raise FileNotFoundError(f"Image not found or unsupported: {path}")
@@ -257,6 +266,8 @@ def load_image_preserve_size(path, max_size=None, auto_policy=True):
 
 
 def smooth_before_kmeans(image):
+    # Stage 4: remove small color texture before K-Means so color regions follow
+    # meaningful surfaces instead of JPEG noise or anti-aliased pixels.
     if PRE_KMEANS_MEAN_SHIFT_ENABLED:
         bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         shifted = cv2.pyrMeanShiftFiltering(
@@ -274,6 +285,8 @@ def smooth_before_kmeans(image):
 
 
 def estimate_min_k_from_smoothed_colors(image, max_sample=40000, rgb_bin_size=16):
+    # Stage 5: estimate a per-image minimum palette size from coarse color
+    # variety and Lab-space spread.
     pixels = image.reshape(-1, 3)
     if len(pixels) > max_sample:
         rng = np.random.default_rng(7)
@@ -296,6 +309,8 @@ def estimate_min_k_from_smoothed_colors(image, max_sample=40000, rgb_bin_size=16
 
 
 def difficulty_k_values(min_k, policy=None):
+    # Stage 6: expand the palette size by difficulty. Simple artwork uses a
+    # smaller growth curve so hard mode adds structure, not background texture.
     policy = policy or {}
     margins = policy.get("difficulty_margins", DIFFICULTY_MARGINS)
     upper_bound = int(policy.get("k_upper_bound", K_UPPER_BOUND))
@@ -317,6 +332,8 @@ def upscale_for_segmentation_output(image, quantized, labels, palette, scale):
 
 
 def merge_background_similar_labels(labels, palette, image, distance_threshold):
+    # Stage 7: for flat artwork, merge near-background palette labels before
+    # edge extraction so faint background noise does not become colorable areas.
     background_color = estimate_background_color(image).astype(np.float32)
     palette_float = palette.astype(np.float32)
     distances = np.linalg.norm(palette_float - background_color, axis=1)
@@ -335,6 +352,8 @@ def merge_background_similar_labels(labels, palette, image, distance_threshold):
 
 
 def object_first_edges(label_map, min_area, close_kernel=5):
+    # Stage 8: derive the primary color-region borders from quantized labels.
+    # These black lines define where the user can color without crossing regions.
     labels = np.asarray(label_map, dtype=np.int32)
     edge = np.zeros(labels.shape, dtype=np.uint8)
     kernel = np.ones((close_kernel, close_kernel), np.uint8)
@@ -399,6 +418,8 @@ def source_detail_boundary_edges(
     max_span=SEGMENTATION_DETAIL_MAX_SPAN,
     non_dark_threshold=SEGMENTATION_DETAIL_NON_DARK_THRESHOLD,
 ):
+    # Stage 9: promote important source-image edges that K-Means can miss,
+    # such as facial marks, small object boundaries, and high-contrast details.
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     edges = cv2.Canny(gray, low, high)
@@ -444,6 +465,8 @@ def dark_detail_region_edges(
     max_aspect=SEGMENTATION_DARK_REGION_MAX_ASPECT,
     min_extent=SEGMENTATION_DARK_REGION_MIN_EXTENT,
 ):
+    # Stage 10: capture compact dark regions, for example pupils, tiny eyes,
+    # mouth marks, or other features that should become closed coloring limits.
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     dark = (gray < dark_threshold).astype(np.uint8) * 255
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark, 8)
@@ -487,6 +510,8 @@ def closed_detail_shape_edges(
     min_extent=SEGMENTATION_CLOSED_DETAIL_MIN_EXTENT,
     close_kernel=SEGMENTATION_CLOSED_DETAIL_CLOSE_KERNEL,
 ):
+    # Stage 11: close near-complete detail contours before promotion so small
+    # shapes are less likely to remain as broken, uncolorable strokes.
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     edges = cv2.Canny(gray, low, high)
@@ -603,6 +628,8 @@ def draw_paint_by_number_style(
     min_region_area,
     segmentation_edges=None,
 ):
+    # Stage 12: render the printable coloring-book page. Segmentation lines are
+    # black limits; detail-only strokes are gray so they do not imply fill areas.
     h, w = region_map.shape[:2]
     canvas = np.full((h, w, 3), 255, dtype=np.uint8)
     if segmentation_edges is None:
@@ -648,6 +675,8 @@ def draw_paint_by_number_style(
 
 
 def draw_segmentation_filled_preview(segmentation_edges, regions, region_map, label_map, palette):
+    # Stage 13: render a validation preview that fills exactly the detected
+    # regions, making leaks, missing borders, and tiny holes easy to inspect.
     h, w = region_map.shape[:2]
     canvas = np.full((h, w, 3), 255, dtype=np.uint8)
     for region in regions:
@@ -666,6 +695,9 @@ def draw_segmentation_filled_preview(segmentation_edges, regions, region_map, la
 
 
 def render_difficulty(image, simplified, target_k, policy=None):
+    # Stage 14: generate one difficulty level end-to-end from a working image.
+    # This function intentionally keeps segmentation edges and printed lines
+    # aligned so the visible coloring-book boundaries match the fill preview.
     policy = policy or {}
     area_scale = max(1.0, float(SEGMENTATION_OUTPUT_SCALE) ** 2)
     object_min_area = int(round(OBJECT_MIN_AREA * area_scale))
@@ -674,6 +706,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
 
     kmeans_img, palette, labels = kmeans_quantization_with_labels(simplified, target_k)
     if policy.get("simple_color_art", False):
+        # Flat artwork often has multiple near-white/noisy labels. Merge them
+        # before edge extraction to avoid artificial background islands.
         labels, palette = merge_background_similar_labels(
             labels,
             palette,
@@ -721,6 +755,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
         cv2.bitwise_or(cv2.bitwise_or(object_raw, source_boundary_edges), dark_region_edges),
         closed_detail_edges,
     )
+    # Morphological closing reconnects small gaps so colorable regions are
+    # bounded by continuous black lines.
     object_seg_connected = connect_segmentation_edges(
         segmentation_source_edges,
         kernel_size=policy.get("connect_kernel", SEGMENTATION_CONNECT_KERNEL),
@@ -746,6 +782,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
     )
 
     segmentation_line_image = cv2.bitwise_not(object_seg_clean)
+    # Connected components on the inverse line image are the actual fillable
+    # regions used for numbering and for the filled validation preview.
     region_map, regions = segment_connected_components(segmentation_line_image, min_colorable_region_area)
     background_color = estimate_background_color(up_kmeans)
     regions = assign_region_color_numbers(
@@ -762,6 +800,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
         if int(region["id"]) in background_ids:
             region["is_background"] = True
 
+    # Final output pair: printable line art plus a color-filled segmentation
+    # preview for quality checking.
     result = draw_paint_by_number_style(
         detail_edges,
         regions,
@@ -783,6 +823,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
 
 
 def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
+    # Stage 15: batch orchestration for service-style processing. Each input
+    # image is profiled once, then rendered at easy/normal/hard settings.
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -796,6 +838,8 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
     summary_rows = []
     for image_path in image_paths:
         start = time.perf_counter()
+        # Load once per image so all difficulty levels share the same adaptive
+        # policy and working resolution.
         image, profile, policy = load_image_preserve_size(
             image_path,
             max_size=max_size,
@@ -818,6 +862,7 @@ def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
             flush=True,
         )
         for difficulty, target_k in k_values.items():
+            # Render and save both the printable page and the filled preview.
             result, filled_preview, metrics = render_difficulty(image, simplified, target_k, policy=policy)
             output_path = output_dir / f"{image_path.stem}_{difficulty}_k{target_k}.png"
             save_image_rgb(str(output_path), result)
