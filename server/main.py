@@ -41,11 +41,34 @@ def health():
     return {"status": "ok"}
 
 
+DIFFICULTY_TO_K = {
+    "쉬움": 10,
+    "보통": 20,
+    "어려움": 30,
+    "easy": 10,
+    "normal": 20,
+    "hard": 30,
+}
+
+
+def resolve_color_count(k, difficulty):
+    if k is not None:
+        return k
+    if difficulty not in DIFFICULTY_TO_K:
+        raise HTTPException(status_code=400, detail=f"unsupported difficulty: {difficulty}")
+    return DIFFICULTY_TO_K[difficulty]
+
+
 @app.post("/api/generate")
-def generate(image: UploadFile = File(...), k: int = Form(...)):
+def generate(
+    image: UploadFile = File(...),
+    k: int | None = Form(None),
+    difficulty: str = Form("보통"),
+):
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="image must be an image file")
 
+    color_count = resolve_color_count(k, difficulty)
     result_id = uuid4().hex
     suffix = Path(image.filename or "").suffix.lower()
     if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
@@ -58,7 +81,7 @@ def generate(image: UploadFile = File(...), k: int = Form(...)):
     try:
         result = generate_coloring_book(
             upload_path,
-            k=k,
+            k=color_count,
             output_root=GENERATED_DIR,
             result_id=result_id,
         )
@@ -84,4 +107,6 @@ def generate(image: UploadFile = File(...), k: int = Form(...)):
         "palette": result["palette"],
         "metrics": result["metrics"],
         "image_size": result["image_size"],
+        "difficulty": difficulty,
+        "k": color_count,
     }

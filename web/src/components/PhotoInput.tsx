@@ -4,19 +4,24 @@ import { useRef } from 'react'
 interface PhotoInputProps {
   image?: string | null
   setImage: (image: string | null) => void
+  setFile: (file: File | null) => void
 }
 
-const PhotoInput = ({ image, setImage }: PhotoInputProps) => {
+const PhotoInput = ({ image, setImage, setFile }: PhotoInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      setFile(file)
       const reader = new FileReader()
       reader.onloadend = () => {
         setImage(reader.result as string)
       }
       reader.readAsDataURL(file)
+    } else {
+      setFile(null)
+      setImage(null)
     }
   }
 
