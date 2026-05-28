@@ -1,0 +1,4 @@
+image,difficulty,K,regions,small_regions,edge_density,original_size,working_size,policy,k_upper_bound,output
+ych.jpg,easy,13,1454,901,0.0393,1440x900,1440x900,high,60,ych_easy_k13.png
+ych.jpg,normal,23,1571,997,0.0464,1440x900,1440x900,high,60,ych_normal_k23.png
+ych.jpg,hard,33,1852,1156,0.0464,1440x900,1440x900,high,60,ych_hard_k33.png

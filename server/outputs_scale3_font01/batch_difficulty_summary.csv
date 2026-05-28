@@ -1,0 +1,10 @@
+image,difficulty,K,regions,small_regions,edge_density,original_size,working_size,policy,k_upper_bound,output
+doraemong.jpeg,easy,10,166,143,0.0134,519x512,1100x1085,simple,18,doraemong_easy_k10.png
+doraemong.jpeg,normal,14,502,379,0.0219,519x512,1100x1085,simple,18,doraemong_normal_k14.png
+doraemong.jpeg,hard,18,678,566,0.0181,519x512,1100x1085,simple,18,doraemong_hard_k18.png
+landscape.jpg,easy,13,870,707,0.0178,5184x3456,1800x1200,normal,60,landscape_easy_k13.png
+landscape.jpg,normal,23,894,676,0.0239,5184x3456,1800x1200,normal,60,landscape_normal_k23.png
+landscape.jpg,hard,33,1092,834,0.0274,5184x3456,1800x1200,normal,60,landscape_hard_k33.png
+ych.jpg,easy,13,1437,878,0.0390,1440x900,1440x900,high,60,ych_easy_k13.png
+ych.jpg,normal,23,1529,956,0.0457,1440x900,1440x900,high,60,ych_normal_k23.png
+ych.jpg,hard,33,1594,988,0.0465,1440x900,1440x900,high,60,ych_hard_k33.png

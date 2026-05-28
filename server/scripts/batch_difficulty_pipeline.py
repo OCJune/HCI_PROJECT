@@ -35,7 +35,7 @@ SIMPLIFY_DIAMETER = 9
 SIMPLIFY_SIGMA_COLOR = 90
 SIMPLIFY_SIGMA_SPACE = 90
 
-SEGMENTATION_OUTPUT_SCALE = 2.0
+SEGMENTATION_OUTPUT_SCALE = 3.0
 OBJECT_MIN_AREA = 260
 OBJECT_CLOSE_KERNEL = 5
 SEGMENTATION_CONNECT_KERNEL = 3
@@ -43,11 +43,16 @@ SEGMENTATION_CONNECT_ITER = 1
 SEGMENTATION_EDGE_THICKNESS = 2
 SEGMENTATION_LINE_COLOR = (0, 0, 0)
 DETAIL_LINE_GRAY = 150
-MIN_REGION_AREA = 160
+MIN_REGION_AREA = 60
 MIN_COLORABLE_REGION_AREA = 1
 DETAIL_RENDER_MIN_AREA = 2
 DETAIL_RENDER_MIN_ARC_LENGTH = 6
 DETAIL_RENDER_MIN_POINTS = 3
+NUMBER_TEXT_GRAY = 130
+NUMBER_FONT_MAX_SCALE = 0.90
+NUMBER_FONT_MIN_SCALE = 0.10
+NUMBER_FONT_PADDING = 1
+NUMBER_FONT_SCALE_MULTIPLIER = 1.25
 
 DETAIL_CANNY_LOW = 90
 DETAIL_CANNY_HIGH = 200
@@ -576,7 +581,13 @@ def best_label_point(region_map, region_id, bbox):
     return x + max_loc[0], y + max_loc[1]
 
 
-def fit_number_font_scale(text, bbox, max_scale=0.62, min_scale=0.22, padding=5):
+def fit_number_font_scale(
+    text,
+    bbox,
+    max_scale=NUMBER_FONT_MAX_SCALE,
+    min_scale=NUMBER_FONT_MIN_SCALE,
+    padding=NUMBER_FONT_PADDING,
+):
     _, _, w, h = bbox
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = max_scale
@@ -665,12 +676,15 @@ def draw_paint_by_number_style(
             continue
         text = str(region.get("color_id", region["id"]))
         cx, cy = best_label_point(region_map, int(region["id"]), region["bbox"])
-        scale = fit_number_font_scale(text, region["bbox"])
+        scale = min(
+            NUMBER_FONT_MAX_SCALE,
+            fit_number_font_scale(text, region["bbox"]) * NUMBER_FONT_SCALE_MULTIPLIER,
+        )
         (tw, th), _ = cv2.getTextSize(text, font, scale, 1)
         x0, y0, bw, bh = region["bbox"]
         x = int(np.clip(cx - tw / 2, x0 + 2, max(x0 + 2, x0 + bw - tw - 2)))
         y = int(np.clip(cy + th / 2, y0 + th + 2, max(y0 + th + 2, y0 + bh - 2)))
-        cv2.putText(canvas, text, (x, y), font, scale, (145, 145, 145), 1, cv2.LINE_AA)
+        cv2.putText(canvas, text, (x, y), font, scale, (NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY), 1, cv2.LINE_AA)
     return canvas
 
 
