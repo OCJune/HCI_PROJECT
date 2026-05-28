@@ -2,9 +2,13 @@ import { useState } from 'react'
 import Header from './components/Header'
 import ImageComparison from './components/ImageComparison'
 import PhotoInput from './components/PhotoInput'
+import DifficultyDropdown from './components/DifficultyDropdown'
+import { ChevronDown } from 'lucide-react'
 
 function App() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null)
+  const [difficulty, setDifficulty] = useState('보통')
+  const difficulties = ['쉬움', '보통', '어려움']
 
   return (
     <div className="h-full min-h-screen max-w-full min-w-fit bg-gray-50">
@@ -31,13 +35,22 @@ function App() {
               <PhotoInput image={uploadedImage} setImage={setUploadedImage} />
 
               <div className="flex items-center gap-4">
-                <input
-                  type="number"
-                  className="w-[150px] flex-1 [appearance:textfield] rounded-lg bg-white px-6 py-4 text-center text-base font-medium text-gray-900 shadow-2xl outline-none placeholder:text-gray-300 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  placeholder="색 개수 입력"
-                />
+                <DifficultyDropdown
+                  difficulties={difficulties}
+                  setDifficulty={setDifficulty}
+                >
+                  <button
+                    type="button"
+                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 hover:bg-gray-50"
+                  >
+                    <span className="text-base font-medium break-keep">
+                      {difficulty}
+                    </span>
+                    <ChevronDown size={20} className="text-gray-400" />
+                  </button>
+                </DifficultyDropdown>
 
-                <button className="cursor-pointer rounded-lg bg-gray-900 px-8 py-4 text-gray-50 shadow-2xl">
+                <button className="cursor-pointer rounded-lg bg-gray-900 px-8 py-4 text-gray-50">
                   <span className="text-base font-medium break-keep text-gray-50">
                     변환
                   </span>
