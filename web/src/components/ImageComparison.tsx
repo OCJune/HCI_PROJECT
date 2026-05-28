@@ -91,16 +91,16 @@ const ImageComparison: React.FC<ImageComparisonProps> = ({
         <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-white shadow-lg" />
 
         {/* Slider Handle */}
-        <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white p-2 shadow-xl ring-4 ring-black/10">
-          <Code />
+        <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white p-1.5 shadow-xl ring-4 ring-black/10 md:p-2">
+          <Code className="h-4 w-4 md:h-6 md:w-6" />
         </div>
       </div>
 
       {/* Labels */}
-      <div className="absolute bottom-4 left-4 z-20 rounded-lg bg-black/50 px-3 py-1 text-sm font-medium text-white backdrop-blur-sm">
+      <div className="absolute bottom-3 left-3 z-20 rounded-lg bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm md:bottom-4 md:left-4 md:px-3 md:text-sm">
         원본 사진
       </div>
-      <div className="absolute right-4 bottom-4 z-20 rounded-lg bg-black/50 px-3 py-1 text-sm font-medium text-white backdrop-blur-sm">
+      <div className="absolute right-3 bottom-3 z-20 rounded-lg bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm md:right-4 md:bottom-4 md:px-3 md:text-sm">
         도안
       </div>
     </div>

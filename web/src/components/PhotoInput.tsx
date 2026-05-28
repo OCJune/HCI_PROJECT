@@ -38,13 +38,13 @@ const PhotoInput = ({ image, setImage }: PhotoInputProps) => {
           />
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 px-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-md">
-            <Upload size={32} className="text-blue-600" />
+        <div className="flex flex-col items-center gap-3 px-6 text-center md:gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-md md:h-16 md:w-16">
+            <Upload className="h-6 w-6 text-blue-600 md:h-8 md:w-8" />
           </div>
           <div>
-            <p className="text-xl font-bold text-gray-900">사진 업로드하기</p>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="text-lg font-bold text-gray-900 md:text-xl">사진 업로드하기</p>
+            <p className="mt-1 text-xs text-gray-500 md:text-sm">
               클릭하여 컬러링북으로 만들 사진을 선택하세요
             </p>
           </div>
