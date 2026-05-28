@@ -266,6 +266,9 @@ def load_image_preserve_size(path, max_size=None, auto_policy=True):
             "closed_detail_high": SEGMENTATION_CLOSED_DETAIL_HIGH,
             "connect_kernel": SEGMENTATION_CONNECT_KERNEL,
             "connect_iter": SEGMENTATION_CONNECT_ITER,
+            "simple_color_art": False,
+            "k_upper_bound": K_UPPER_BOUND,
+            "difficulty_margins": DIFFICULTY_MARGINS,
         }
     image, scale = resize_to_long_edge(original, policy["target_long_edge"])
     profile["working_width"] = int(image.shape[1])
