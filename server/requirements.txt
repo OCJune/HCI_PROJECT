@@ -2,3 +2,6 @@ opencv-python
 numpy
 matplotlib
 jupyter
+fastapi
+uvicorn
+python-multipart
