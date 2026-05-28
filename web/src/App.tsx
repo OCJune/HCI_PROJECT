@@ -42,9 +42,9 @@ function App() {
                 >
                   <button
                     type="button"
-                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 hover:bg-gray-50"
+                    className="flex min-w-30 cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 hover:bg-gray-50"
                   >
-                    <span className="text-base font-medium break-keep">
+                    <span className="flex-1 text-base font-medium break-keep">
                       {difficulty}
                     </span>
                     <ChevronDown size={20} className="text-gray-400" />
