@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,6 +51,21 @@ DIFFICULTY_TO_K = {
     "hard": 30,
 }
 
+DOWNLOAD_ASSETS = {
+    "coloring": {
+        "filename": "final_numbered_coloringbook.png",
+        "download_name": "coloring-book.png",
+    },
+    "combined": {
+        "filename": "numbered_with_color_index.png",
+        "download_name": "coloring-book-with-palette.png",
+    },
+    "palette": {
+        "filename": "palette.png",
+        "download_name": "coloring-book-palette.png",
+    },
+}
+
 
 def resolve_color_count(k, difficulty):
     if k is not None:
@@ -93,12 +109,21 @@ def generate(
     def url_for_asset(name):
         return f"/generated/{result_id}/{name}"
 
+    def download_url(asset_name):
+        return f"/api/results/{result_id}/download/{asset_name}"
+
     return {
         "result_id": result["result_id"],
         "original_url": url_for_asset("original.png"),
         "coloring_url": url_for_asset("final_numbered_coloringbook.png"),
         "palette_url": url_for_asset("palette.png"),
         "combined_url": url_for_asset("numbered_with_color_index.png"),
+        "download_url": download_url("coloring"),
+        "download_urls": {
+            "coloring": download_url("coloring"),
+            "combined": download_url("combined"),
+            "palette": download_url("palette"),
+        },
         "preview_urls": {
             "kmeans": url_for_asset("kmeans.png"),
             "segmentation": url_for_asset("region_preview.png"),
@@ -110,3 +135,23 @@ def generate(
         "difficulty": difficulty,
         "k": color_count,
     }
+
+
+@app.get("/api/results/{result_id}/download/{asset_name}")
+def download_result(result_id: str, asset_name: str):
+    if asset_name not in DOWNLOAD_ASSETS:
+        raise HTTPException(status_code=404, detail="download asset not found")
+
+    if not result_id.isalnum():
+        raise HTTPException(status_code=400, detail="invalid result id")
+
+    asset = DOWNLOAD_ASSETS[asset_name]
+    file_path = GENERATED_DIR / result_id / asset["filename"]
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="result file not found")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/png",
+        filename=asset["download_name"],
+    )

@@ -15,6 +15,12 @@ interface GenerateResponse {
   coloring_url: string
   palette_url: string
   combined_url: string
+  download_url: string
+  download_urls: {
+    coloring: string
+    combined: string
+    palette: string
+  }
   difficulty: string
   k: number
 }
@@ -92,14 +98,22 @@ function App() {
                 afterImage={comparisonAfter}
               />
               {result && (
-                <a
-                  href={assetUrl(result.combined_url)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-700"
-                >
-                  색상표 포함 결과 보기
-                </a>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                  <a
+                    href={assetUrl(result.download_url)}
+                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                  >
+                    도안 저장하기
+                  </a>
+                  <a
+                    href={assetUrl(result.combined_url)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    색상표 포함 결과 보기
+                  </a>
+                </div>
               )}
             </div>
 
