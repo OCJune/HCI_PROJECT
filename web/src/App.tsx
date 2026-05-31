@@ -134,17 +134,15 @@ function App() {
                 </button>
               </div>
 
-              {errorMessage && (
-                <p className="max-w-md text-center text-sm font-medium break-keep text-red-500">
-                  {errorMessage}
-                </p>
-              )}
-
-              {result && (
-                <p className="text-sm font-medium text-gray-500">
-                  {result.difficulty} 난이도, {result.k}색으로 생성되었습니다.
-                </p>
-              )}
+              <div className="flex h-6 items-center justify-center text-sm font-medium break-keep">
+                {errorMessage ? (
+                  <p className="text-red-500">{errorMessage}</p>
+                ) : result ? (
+                  <p className="text-gray-500">
+                    {result.difficulty} 난이도, {result.k}색으로 생성되었습니다.
+                  </p>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex flex-col items-center">
