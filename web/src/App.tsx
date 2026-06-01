@@ -8,7 +8,8 @@ import { ChevronDown } from 'lucide-react'
 import beforeImage from './images/beforeImage.png'
 import afterImage from './images/afterImage.png'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 interface GenerateResponse {
   original_url: string
@@ -64,7 +65,9 @@ function App() {
       setResult(data)
     } catch (error) {
       setErrorMessage(
-        error instanceof Error ? error.message : '컬러링북 생성에 실패했습니다.',
+        error instanceof Error
+          ? error.message
+          : '컬러링북 생성에 실패했습니다.',
       )
     } finally {
       setIsGenerating(false)
@@ -73,7 +76,7 @@ function App() {
 
   const comparisonBefore = result
     ? assetUrl(result.original_url)
-    : uploadedImage ?? beforeImage
+    : (uploadedImage ?? beforeImage)
   const comparisonAfter = result ? assetUrl(result.coloring_url) : afterImage
 
   return (
@@ -92,31 +95,6 @@ function App() {
           </div>
 
           <div className="grid w-full grid-cols-1 items-start gap-12 lg:grid-cols-2 lg:gap-8">
-            <div className="flex flex-col items-center">
-              <ImageComparison
-                beforeImage={comparisonBefore}
-                afterImage={comparisonAfter}
-              />
-              {result && (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
-                  <a
-                    href={assetUrl(result.download_url)}
-                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-                  >
-                    도안 저장하기
-                  </a>
-                  <a
-                    href={assetUrl(result.combined_url)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                  >
-                    색상표 포함 결과 보기
-                  </a>
-                </div>
-              )}
-            </div>
-
             <div className="flex flex-col items-center gap-6 md:gap-8">
               <PhotoInput
                 image={uploadedImage}
@@ -156,18 +134,84 @@ function App() {
                 </button>
               </div>
 
-              {errorMessage && (
-                <p className="max-w-md text-center text-sm font-medium break-keep text-red-500">
-                  {errorMessage}
-                </p>
-              )}
+              <div className="flex h-6 items-center justify-center text-sm font-medium break-keep">
+                {errorMessage ? (
+                  <p className="text-red-500">{errorMessage}</p>
+                ) : result ? (
+                  <p className="text-gray-500">
+                    {result.difficulty} 난이도, {result.k}색으로 생성되었습니다.
+                  </p>
+                ) : null}
+              </div>
+            </div>
 
+            <div className="flex flex-col items-center">
+              <ImageComparison
+                beforeImage={comparisonBefore}
+                afterImage={comparisonAfter}
+              />
               {result && (
-                <p className="text-sm font-medium text-gray-500">
-                  {result.difficulty} 난이도, {result.k}색으로 생성되었습니다.
-                </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                  <a
+                    href={assetUrl(result.download_url)}
+                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                  >
+                    도안 저장하기
+                  </a>
+                  <a
+                    href={assetUrl(result.combined_url)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    색상표 포함 결과 보기
+                  </a>
+                </div>
               )}
             </div>
+          </div>
+
+          {/* 사용 설명 섹션 */}
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                step: '01',
+                title: '사진 업로드',
+                description:
+                  '변환하고 싶은 사진을 선택하거나 드래그하여 업로드합니다.',
+              },
+              {
+                step: '02',
+                title: '난이도 선택',
+                description: '원하는 난이도(색상 수)를 선택합니다.',
+              },
+              {
+                step: '03',
+                title: '컬러링북 생성',
+                description:
+                  "'변환' 버튼을 눌러 나만의 컬러링 도안을 만듭니다.",
+              },
+              {
+                step: '04',
+                title: '결과 저장',
+                description: '완성된 도안과 팔레트를 확인하고 저장합니다.',
+              },
+            ].map((item) => (
+              <div
+                key={item.step}
+                className="flex flex-col gap-4 rounded-2xl border border-gray-100 bg-white p-8 transition-all hover:shadow-lg"
+              >
+                <span className="text-sm font-bold text-blue-600">
+                  {item.step}
+                </span>
+                <h3 className="text-xl font-bold text-gray-900">
+                  {item.title}
+                </h3>
+                <p className="text-sm leading-relaxed break-keep text-gray-500">
+                  {item.description}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </main>
