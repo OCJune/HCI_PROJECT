@@ -789,7 +789,7 @@ def draw_segmentation_filled_preview(segmentation_edges, regions, region_map, la
     return canvas
 
 
-def render_difficulty(image, simplified, target_k, policy=None):
+def render_difficulty(image, simplified, target_k, policy=None, return_details=False):
     # Stage 14: generate one difficulty level end-to-end from a working image.
     # This function intentionally keeps segmentation edges and printed lines
     # aligned so the visible coloring-book boundaries match the fill preview.
@@ -916,6 +916,20 @@ def render_difficulty(image, simplified, target_k, policy=None):
     numbered_regions = [region for region in regions if not region.get("is_background", False)]
     metrics = region_metrics(numbered_regions, up_image.shape, small_area=300)
     metrics["edge_density"] = edge_density(object_final_clean)
+    if return_details:
+        details = {
+            "palette": palette,
+            "regions": regions,
+            "region_map": region_map,
+            "image": up_image,
+            "kmeans": up_kmeans,
+            "labels": up_labels,
+            "segmentation_edges": object_seg_clean,
+            "line_image": cv2.bitwise_not(object_final_clean),
+            "segmentation_line_image": segmentation_line_image,
+            "detail_edges": detail_edges,
+        }
+        return result, filled_preview, metrics, details
     return result, filled_preview, metrics
 
 
