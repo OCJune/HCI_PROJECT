@@ -48,11 +48,11 @@ MIN_COLORABLE_REGION_AREA = 1
 DETAIL_RENDER_MIN_AREA = 2
 DETAIL_RENDER_MIN_ARC_LENGTH = 6
 DETAIL_RENDER_MIN_POINTS = 3
-NUMBER_TEXT_GRAY = 130
-NUMBER_FONT_MAX_SCALE = 0.90
+NUMBER_TEXT_GRAY = 90
+NUMBER_FONT_MAX_SCALE = 0.75
 NUMBER_FONT_MIN_SCALE = 0.10
-NUMBER_FONT_PADDING = 1
-NUMBER_FONT_SCALE_MULTIPLIER = 1.25
+NUMBER_FONT_PADDING = 6
+NUMBER_FONT_SCALE_MULTIPLIER = 1.0
 LABEL_ISLAND_CLEANUP_ENABLED = True
 LABEL_ISLAND_MIN_AREA = 36
 LABEL_ISLAND_FORCE_MERGE_AREA = 10
@@ -623,10 +623,12 @@ def best_label_point(region_map, region_id, bbox):
     x, y, w, h = bbox
     component = (region_map[y:y + h, x:x + w] == region_id).astype(np.uint8)
     if component.size == 0 or np.count_nonzero(component) == 0:
-        return x + w / 2, y + h / 2
-    dist = cv2.distanceTransform(component, cv2.DIST_L2, 5)
-    _, _, _, max_loc = cv2.minMaxLoc(dist)
-    return x + max_loc[0], y + max_loc[1]
+        return x + w / 2, y + h / 2, 0.0
+    # Pad by 1 so border pixels get a realistic distance instead of zero
+    padded = cv2.copyMakeBorder(component, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    dist = cv2.distanceTransform(padded, cv2.DIST_L2, 5)[1:-1, 1:-1]
+    _, max_dist, _, max_loc = cv2.minMaxLoc(dist)
+    return x + max_loc[0], y + max_loc[1], float(max_dist)
 
 
 def fit_number_font_scale(
@@ -635,10 +637,18 @@ def fit_number_font_scale(
     max_scale=NUMBER_FONT_MAX_SCALE,
     min_scale=NUMBER_FONT_MIN_SCALE,
     padding=NUMBER_FONT_PADDING,
+    max_dist=None,
 ):
     _, _, w, h = bbox
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = max_scale
+    effective_max = max_scale
+    if max_dist is not None and max_dist > 0:
+        # Clamp so text height (≈ scale×37px for HERSHEY_SIMPLEX) fits within
+        # the interior clearance at the pole of inaccessibility.
+        dist_cap = max(0.0, (float(max_dist) - 3.0) * 2.0 / 37.0)
+        effective_max = min(effective_max, dist_cap)
+    effective_max = max(effective_max, min_scale)
+    scale = effective_max
     while scale > min_scale:
         (tw, th), _ = cv2.getTextSize(text, font, scale, 1)
         if tw <= max(1, w - padding * 2) and th <= max(1, h - padding * 2):
@@ -719,20 +729,43 @@ def draw_paint_by_number_style(
             )
 
     font = cv2.FONT_HERSHEY_SIMPLEX
+    occupied_rects = []
     for region in sorted(regions, key=lambda r: r["area"], reverse=True):
         if region["area"] < min_region_area:
             continue
         text = str(region.get("color_id", region["id"]))
-        cx, cy = best_label_point(region_map, int(region["id"]), region["bbox"])
+        cx, cy, max_dist = best_label_point(region_map, int(region["id"]), region["bbox"])
         scale = min(
             NUMBER_FONT_MAX_SCALE,
-            fit_number_font_scale(text, region["bbox"]) * NUMBER_FONT_SCALE_MULTIPLIER,
+            fit_number_font_scale(text, region["bbox"], max_dist=max_dist) * NUMBER_FONT_SCALE_MULTIPLIER,
         )
-        (tw, th), _ = cv2.getTextSize(text, font, scale, 1)
+        thickness = max(1, int(round(scale * 3.0)))
+        (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
         x0, y0, bw, bh = region["bbox"]
-        x = int(np.clip(cx - tw / 2, x0 + 2, max(x0 + 2, x0 + bw - tw - 2)))
-        y = int(np.clip(cy + th / 2, y0 + th + 2, max(y0 + th + 2, y0 + bh - 2)))
-        cv2.putText(canvas, text, (x, y), font, scale, (NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY), 1, cv2.LINE_AA)
+        x = int(np.clip(
+            cx - tw / 2,
+            x0 + NUMBER_FONT_PADDING,
+            max(x0 + NUMBER_FONT_PADDING, x0 + bw - tw - NUMBER_FONT_PADDING),
+        ))
+        y = int(np.clip(
+            cy + th / 2,
+            y0 + th + NUMBER_FONT_PADDING,
+            max(y0 + th + NUMBER_FONT_PADDING, y0 + bh - NUMBER_FONT_PADDING),
+        ))
+        label_rect = (x - 2, y - th - 2, x + tw + 2, y + baseline + 2)
+        overlaps = any(
+            not (label_rect[2] < r[0] or label_rect[0] > r[2]
+                 or label_rect[3] < r[1] or label_rect[1] > r[3])
+            for r in occupied_rects
+        )
+        if overlaps:
+            continue
+        occupied_rects.append(label_rect)
+        cv2.putText(
+            canvas, text, (x, y), font, scale,
+            (NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY, NUMBER_TEXT_GRAY),
+            thickness, cv2.LINE_AA,
+        )
     return canvas
 
 
