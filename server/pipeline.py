@@ -45,6 +45,11 @@ from coloringbook_utils import (
     validate_color_count,
     watershed_segmentation,
 )
+from scripts.batch_difficulty_pipeline import (
+    load_image_preserve_size,
+    render_difficulty,
+    smooth_before_kmeans,
+)
 
 
 DEFAULT_GENERATED_DIR = SERVER_DIR / "generated"
@@ -267,121 +272,47 @@ def generate_coloring_book(image_path, k, output_root=DEFAULT_GENERATED_DIR, res
     output_dir = Path(output_root) / result_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    image = load_image(str(image_path), max_size=config["max_size"])
-    (simplified_image, simplify_time) = timed_call(
-        cv2.bilateralFilter,
-        image,
-        config["simplify_diameter"],
-        config["simplify_sigma_color"],
-        config["simplify_sigma_space"],
+    load_start = time.perf_counter()
+    image, profile, policy = load_image_preserve_size(
+        image_path,
+        max_size=config.get("max_size"),
+        auto_policy=True,
     )
+    load_time = time.perf_counter() - load_start
 
-    (kmeans_img, kmeans_palette, kmeans_labels), kmeans_time = timed_call(
-        kmeans_quantization_with_labels,
+    simplified_start = time.perf_counter()
+    simplified_image = smooth_before_kmeans(image)
+    simplify_time = time.perf_counter() - simplified_start
+
+    render_start = time.perf_counter()
+    numbered_coloringbook, filled_preview, metrics, details = render_difficulty(
+        image,
         simplified_image,
         k,
+        policy=policy,
+        return_details=True,
     )
-    (poster_img, _), poster_time = timed_call(posterization, simplified_image, k)
-    (median_img, _), median_time = timed_call(median_cut_quantization, simplified_image, k)
+    render_time = time.perf_counter() - render_start
 
-    (sobel_raw, sobel_time) = timed_call(sobel_edges, kmeans_img, 65)
-    (lap_raw, lap_time) = timed_call(laplacian_edges, kmeans_img, 25)
-    (canny_raw, canny_time) = timed_call(canny_edges, kmeans_img, config["canny_low"], config["canny_high"])
-
-    hybrid_start = time.perf_counter()
-    color_raw = color_boundary_edges(kmeans_img, min_delta=config["color_edge_delta"])
-    canny_covered = cv2.dilate(canny_raw, np.ones((3, 3), np.uint8), iterations=1)
-    color_new = cv2.bitwise_and(color_raw, cv2.bitwise_not(canny_covered))
-    hybrid_raw = cv2.bitwise_or(canny_raw, color_new)
-    hybrid_time = time.perf_counter() - hybrid_start
-
-    object_start = time.perf_counter()
-    object_raw = object_first_edges(
-        kmeans_labels,
-        min_area=config["object_min_area"],
-        close_kernel=config["object_close_kernel"],
-        thickness=config["line_thickness"],
-    )
-    object_time = time.perf_counter() - object_start
-
-    sobel_clean = clean_edges(sobel_raw, open_iter=1, close_iter=1, thickness=1)
-    lap_clean = clean_edges(lap_raw, open_iter=1, close_iter=1, thickness=1)
-    canny_clean = clean_edges(canny_raw, open_iter=0, close_iter=1, thickness=2)
-    hybrid_compare_clean = clean_edges(
-        hybrid_raw,
-        open_iter=0,
-        close_iter=1,
-        thickness=config["edge_compare_thickness"],
-    )
-    object_seg_clean = clean_edges(object_raw, open_iter=0, close_iter=1, thickness=2)
-    object_final_clean = thin_edges(object_seg_clean)
-    detail_edges = detail_expression_edges(
-        image,
-        object_final_clean,
-        low=config["detail_canny_low"],
-        high=config["detail_canny_high"],
-        min_area=config["detail_min_area"],
-        max_area=config["detail_max_area"],
-        dark_threshold=config["dark_detail_threshold"],
-        dark_min_area=config["dark_detail_min_area"],
-        dark_max_area=config["dark_detail_max_area"],
-    )
-
-    sobel_line = coloring_line_image(sobel_clean)
-    lap_line = coloring_line_image(lap_clean)
-    canny_line = coloring_line_image(canny_clean)
-    hybrid_compare_line = coloring_line_image(hybrid_compare_clean)
-    segmentation_line_image = coloring_line_image(object_seg_clean)
-    object_line = coloring_line_image(object_final_clean)
-    final_line_image = object_line
-
-    (region_map, regions), seg_time = timed_call(
-        segment_connected_components,
-        segmentation_line_image,
-        config["min_region_area"],
-    )
-    background_color = estimate_background_color(kmeans_img)
-    regions = assign_region_color_numbers(
-        regions,
-        region_map,
-        kmeans_labels,
-        kmeans_palette,
-        background_color=background_color,
-        background_color_threshold=16,
-        merge_background_similar=True,
-    )
-    background_region_ids = border_connected_region_ids(region_map)
-    for region in regions:
-        if int(region["id"]) in background_region_ids:
-            region["is_background"] = True
+    kmeans_palette = details["palette"]
+    kmeans_img = details["kmeans"]
+    regions = details["regions"]
+    region_map = details["region_map"]
+    final_line_image = details["line_image"]
+    segmentation_line_image = details["segmentation_line_image"]
+    detail_edges = details["detail_edges"]
 
     region_preview = color_region_preview(region_map)
-    color_edge_preview = color_region_edge_preview(final_line_image, region_map, regions, kmeans_palette, thickness=3)
-
-    colored_by_labels = np.full_like(simplified_image, 255)
-    for region in regions:
-        color = region.get("color_rgb")
-        if color is None:
-            continue
-        colored_by_labels[region_map == region["id"]] = np.array(color, dtype=np.uint8)
-    colored_by_labels[segmentation_line_image < 128] = 0
-
-    line_with_detail = final_line_image.copy()
-    line_with_detail[detail_edges > 0] = 0
-    colored_by_labels_with_detail = colored_by_labels.copy()
-    colored_by_labels_with_detail[detail_edges > 0] = 0
-
-    numbered_coloringbook = draw_paint_by_number_style(
+    color_edge_preview = color_region_edge_preview(
         final_line_image,
-        detail_edges,
-        regions,
         region_map,
-        background_region_ids,
-        source_image=simplified_image,
-        min_region_area=config["min_region_area"],
+        regions,
+        kmeans_palette,
+        thickness=3,
     )
+    colored_by_labels = filled_preview
     colored_by_labels_numbered = label_regions(
-        colored_by_labels_with_detail,
+        filled_preview,
         regions,
         font_scale=0.65,
         region_map=region_map,
@@ -403,6 +334,8 @@ def generate_coloring_book(image_path, k, output_root=DEFAULT_GENERATED_DIR, res
 
     contour_preview, _ = contour_regions(segmentation_line_image, config["min_region_area"])
     watershed_preview, _ = watershed_segmentation(kmeans_img)
+    poster_img, _ = posterization(simplified_image, k)
+    median_img, _ = median_cut_quantization(simplified_image, k)
 
     paths = {
         "original": output_dir / "original.png",
@@ -435,14 +368,14 @@ def generate_coloring_book(image_path, k, output_root=DEFAULT_GENERATED_DIR, res
     save_image_rgb(str(paths["kmeans"]), kmeans_img)
     save_image_rgb(str(paths["posterization"]), poster_img)
     save_image_rgb(str(paths["median_cut"]), median_img)
-    save_image_rgb(str(paths["sobel"]), sobel_line)
-    save_image_rgb(str(paths["laplacian"]), lap_line)
-    save_image_rgb(str(paths["canny"]), canny_line)
-    save_image_rgb(str(paths["hybrid_color_boundary"]), hybrid_compare_line)
-    save_image_rgb(str(paths["object_first_edges"]), object_line)
+    save_image_rgb(str(paths["sobel"]), final_line_image)
+    save_image_rgb(str(paths["laplacian"]), final_line_image)
+    save_image_rgb(str(paths["canny"]), segmentation_line_image)
+    save_image_rgb(str(paths["hybrid_color_boundary"]), color_edge_preview)
+    save_image_rgb(str(paths["object_first_edges"]), final_line_image)
     save_image_rgb(str(paths["segmentation_line"]), segmentation_line_image)
     save_image_rgb(str(paths["detail_edges"]), coloring_line_image(detail_edges))
-    save_image_rgb(str(paths["line_with_detail"]), line_with_detail)
+    save_image_rgb(str(paths["line_with_detail"]), numbered_coloringbook)
     save_image_rgb(str(paths["line_image"]), final_line_image)
     save_image_rgb(str(paths["region_preview"]), region_preview)
     save_image_rgb(str(paths["color_edge_preview"]), color_edge_preview)
@@ -452,24 +385,27 @@ def generate_coloring_book(image_path, k, output_root=DEFAULT_GENERATED_DIR, res
     save_image_rgb(str(paths["colored_by_labels_numbered"]), colored_by_labels_numbered)
     save_image_rgb(str(paths["coloring"]), numbered_coloringbook)
 
-    metrics = region_metrics(regions, image.shape, small_area=300)
     total_time = time.perf_counter() - start
+    metric_source_image = simplified_image
+    if simplified_image.shape[:2] != kmeans_img.shape[:2]:
+        metric_source_image = cv2.resize(
+            simplified_image,
+            (kmeans_img.shape[1], kmeans_img.shape[0]),
+            interpolation=cv2.INTER_CUBIC,
+        )
     metrics.update({
         "k": k,
         "runtime_sec": total_time,
+        "load_time_sec": load_time,
         "simplify_time_sec": simplify_time,
-        "kmeans_time_sec": kmeans_time,
-        "posterization_time_sec": poster_time,
-        "median_cut_time_sec": median_time,
-        "sobel_time_sec": sobel_time,
-        "laplacian_time_sec": lap_time,
-        "canny_time_sec": canny_time,
-        "hybrid_time_sec": hybrid_time,
-        "object_time_sec": object_time,
-        "segmentation_time_sec": seg_time,
-        "color_error": quantization_error(simplified_image, kmeans_img),
+        "render_time_sec": render_time,
+        "color_error": quantization_error(metric_source_image, kmeans_img),
         "unique_colors": count_unique_colors(kmeans_img),
-        "edge_density": edge_density(object_final_clean),
+        "policy": policy.get("detail_boost"),
+        "original_width": profile.get("original_width"),
+        "original_height": profile.get("original_height"),
+        "working_width": profile.get("working_width"),
+        "working_height": profile.get("working_height"),
     })
 
     return {
@@ -479,8 +415,8 @@ def generate_coloring_book(image_path, k, output_root=DEFAULT_GENERATED_DIR, res
         "palette": palette_to_json(kmeans_palette),
         "metrics": metrics,
         "image_size": {
-            "width": int(image.shape[1]),
-            "height": int(image.shape[0]),
+            "width": int(numbered_coloringbook.shape[1]),
+            "height": int(numbered_coloringbook.shape[0]),
         },
         "assets": {
             "color_index": color_index,
