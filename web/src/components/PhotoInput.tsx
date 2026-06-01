@@ -5,9 +5,10 @@ interface PhotoInputProps {
   image?: string | null
   setImage: (image: string | null) => void
   setFile: (file: File | null) => void
+  disabled?: boolean
 }
 
-const PhotoInput = ({ image, setImage, setFile }: PhotoInputProps) => {
+const PhotoInput = ({ image, setImage, setFile, disabled }: PhotoInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,12 +27,20 @@ const PhotoInput = ({ image, setImage, setFile }: PhotoInputProps) => {
   }
 
   const triggerFileInput = () => {
-    fileInputRef.current?.click()
+    if (disabled) return
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+      fileInputRef.current.click()
+    }
   }
 
   return (
     <div
-      className="relative flex aspect-4/3 w-full max-w-4xl cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-4 border-dashed border-gray-100 bg-white transition-all hover:ring-4 hover:ring-blue-500/30"
+      className={`relative flex aspect-4/3 w-full max-w-4xl items-center justify-center overflow-hidden rounded-2xl border-4 border-dashed border-gray-100 bg-white transition-all ${
+        disabled
+          ? 'cursor-not-allowed opacity-50'
+          : 'cursor-pointer hover:ring-4 hover:ring-blue-500/30'
+      }`}
       onClick={triggerFileInput}
     >
       {image ? (
