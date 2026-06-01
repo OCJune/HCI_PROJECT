@@ -145,16 +145,16 @@ function App() {
               </div>
             </div>
 
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center gap-6 md:gap-8">
               <ImageComparison
                 beforeImage={comparisonBefore}
                 afterImage={comparisonAfter}
               />
               {result && (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-4">
                   <a
                     href={assetUrl(result.download_url)}
-                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                    className="cursor-pointer rounded-lg bg-blue-600 px-10 py-4 text-base font-medium break-keep text-gray-50 transition-colors hover:bg-blue-700"
                   >
                     도안 저장하기
                   </a>
