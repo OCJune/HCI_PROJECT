@@ -104,6 +104,7 @@ function App() {
                   setErrorMessage(null)
                 }}
                 setFile={setUploadedFile}
+                disabled={isGenerating}
               />
 
               <div className="flex flex-wrap items-center justify-center gap-4">
