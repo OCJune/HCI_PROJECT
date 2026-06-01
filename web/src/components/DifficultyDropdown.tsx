@@ -3,17 +3,22 @@ import React, { useState } from 'react'
 interface DifficultyDropdownProps extends React.ComponentProps<'div'> {
   difficulties: string[]
   setDifficulty: (difficulty: string) => void
+  disabled?: boolean
 }
 
 const DifficultyDropdown = ({
   difficulties,
   setDifficulty,
+  disabled,
   children,
   ...props
 }: DifficultyDropdownProps) => {
   const [isOpen, setIsOpen] = useState(false)
 
-  const handleToggle = () => setIsOpen((prev) => !prev)
+  const handleToggle = () => {
+    if (disabled) return
+    setIsOpen((prev) => !prev)
+  }
 
   return (
     <div className="relative" {...props}>

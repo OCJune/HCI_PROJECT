@@ -111,10 +111,12 @@ function App() {
                 <DifficultyDropdown
                   difficulties={difficulties}
                   setDifficulty={setDifficulty}
+                  disabled={isGenerating}
                 >
                   <button
                     type="button"
-                    className="flex min-w-[120px] cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 transition-colors hover:bg-gray-50"
+                    disabled={isGenerating}
+                    className="flex min-w-[120px] cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
                   >
                     <span className="flex-1 text-base font-medium break-keep">
                       {difficulty}
