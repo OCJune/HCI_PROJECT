@@ -1,0 +1,11 @@
+- original_size: 5184x3456
+- working_size: 900x600
+- policy: normal
+- edge_density: 0.0256
+- blur_variance: 133.7
+- lab_spread: 86.6
+- min_k: 13
+- k_values: {'easy': 13, 'normal': 23, 'hard': 33}
+- normal_regions: 271
+- normal_small_regions: 177
+- normal_edge_density: 0.0341

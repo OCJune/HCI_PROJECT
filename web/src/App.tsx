@@ -104,16 +104,19 @@ function App() {
                   setErrorMessage(null)
                 }}
                 setFile={setUploadedFile}
+                disabled={isGenerating}
               />
 
               <div className="flex flex-wrap items-center justify-center gap-4">
                 <DifficultyDropdown
                   difficulties={difficulties}
                   setDifficulty={setDifficulty}
+                  disabled={isGenerating}
                 >
                   <button
                     type="button"
-                    className="flex min-w-[120px] cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 transition-colors hover:bg-gray-50"
+                    disabled={isGenerating}
+                    className="flex min-w-[120px] cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-4 text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
                   >
                     <span className="flex-1 text-base font-medium break-keep">
                       {difficulty}
@@ -145,16 +148,16 @@ function App() {
               </div>
             </div>
 
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center gap-6 md:gap-8">
               <ImageComparison
                 beforeImage={comparisonBefore}
                 afterImage={comparisonAfter}
               />
               {result && (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-4">
                   <a
                     href={assetUrl(result.download_url)}
-                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                    className="cursor-pointer rounded-lg bg-blue-600 px-10 py-4 text-base font-medium break-keep text-gray-50 transition-colors hover:bg-blue-700"
                   >
                     도안 저장하기
                   </a>

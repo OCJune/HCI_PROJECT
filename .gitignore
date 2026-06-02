@@ -56,3 +56,6 @@ lerna-debug.log*
 *.log
 *.tmp
 .vercel
+
+.omc
+.omx
